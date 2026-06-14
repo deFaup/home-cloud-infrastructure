@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Home Cloud — Request Access</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --radius: 10px;
+    }
+
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f8fafc;
+        --surface: #ffffff;
+        --border: #e2e8f0;
+        --text: #1e293b;
+        --text-secondary: #475569;
+        --text-muted: #64748b;
+        --accent: #2563eb;
+        --accent-hover: #1d4ed8;
+      }
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 1rem;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 2.5rem 2rem;
+      max-width: 440px;
+      width: 100%;
+      text-align: center;
+    }
+
+    .icon {
+      font-size: 2.5rem;
+      margin-bottom: 0.75rem;
+    }
+
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 0.35rem;
+    }
+
+    .subtitle {
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      margin-bottom: 2rem;
+    }
+
+    .form-group {
+      text-align: left;
+      margin-bottom: 1rem;
+    }
+
+    label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 0.3rem;
+    }
+
+    input[type="text"],
+    input[type="email"] {
+      width: 100%;
+      padding: 0.65rem 0.85rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input:focus {
+      border-color: var(--accent);
+    }
+
+    .btn {
+      width: 100%;
+      padding: 0.7rem;
+      border: none;
+      border-radius: 6px;
+      background: var(--accent);
+      color: #fff;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 0.5rem;
+      transition: background 0.2s;
+    }
+
+    .btn:hover { background: var(--accent-hover); }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .confirmation {
+      display: none;
+    }
+
+    .confirmation .check {
+      font-size: 3rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .confirmation h2 {
+      font-size: 1.25rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .confirmation p {
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+    }
+
+    .note {
+      margin-top: 1.5rem;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .error {
+      color: #fca5a5;
+      font-size: 0.8rem;
+      margin-top: 0.5rem;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <div id="formView">
+    <div class="icon">☁️</div>
+    <h1>Welcome to your home cloud storage</h1>
+    <p class="subtitle">Sign up using the form below to request access to your home cloud.</p>
+
+    <form id="registerForm" action="/" method="POST">
+      <div class="form-group">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" placeholder="Choose a username" required>
+      </div>
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" placeholder="you@example.com" required>
+      </div>
+      <button type="submit" class="btn" id="submitBtn">Submit</button>
+      <p class="error" id="errorMsg"></p>
+    </form>
+
+    <p class="note">Your request will be reviewed by an administrator.</p>
+  </div>
+
+  <div id="confirmView" class="confirmation">
+    <div class="check">✅</div>
+    <h2>Application Submitted</h2>
+    <p>Thank you for signing up! Your request has been received and is being reviewed.</p>
+    <p style="margin-top: 0.75rem;">You will receive a confirmation by email with follow-up information once your request is accepted.</p>
+  </div>
+</div>
+
+<script>
+  document.getElementById('registerForm').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    const btn = document.getElementById('submitBtn');
+    const errorMsg = document.getElementById('errorMsg');
+    btn.disabled = true;
+    btn.textContent = 'Submitting…';
+    errorMsg.style.display = 'none';
+    try {
+      // Send form data as URL-encoded string to the same page URL the page was loaded from (e.g the lambda url)
+      const resp = await fetch(window.location.href, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams(new FormData(this)).toString()
+      });
+      if (!resp.ok) throw new Error('Server error');
+      document.getElementById('formView').style.display = 'none';
+      document.getElementById('confirmView').style.display = 'block';
+    } catch (err) {
+      errorMsg.textContent = 'Something went wrong. Please try again.';
+      errorMsg.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Submit';
+    }
+  });
+</script>
+
+</body>
+</html>
