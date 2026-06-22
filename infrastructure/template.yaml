@@ -5,6 +5,7 @@ Description: >
   The page send the registration request by email (via SES) to the admin.
   Included in that email are two links to an approve/deny lambda function.
   Request to this lambda are authenticated using the KMS-encrypted user email address (present in the email to the admin).
+  The approve function creates the user account via a json API endpoint accessible over Tailscale.
 
 Parameters:
   FromAdminEmail:
@@ -14,28 +15,37 @@ Parameters:
     Type: String
     Description: Email address that receives registration notifications (SES To). Defaults to FromAdminEmail if left empty.
     Default: ""
+  ApproveApiBaseUrl:
+    Type: String
+    Description: >
+      Base URL of the Json API endpoint accessible on your Tailscale network
+      (e.g. http://my-server:3000 or http://100.x.y.z:3000).
+  ApproveApiUsername:
+    Type: String
+    Description: Username for Basic auth on the registration API.
 
 Conditions:
   HasToEmail: !Not [!Equals [!Ref ToAdminEmail, ""]]
 
 Resources:
-  # ── Lambda function ────────────────────────────────────────────────────────
+  # ── Registration Lambda function ────────────────────────────────────────────────────────
   RegistrationFunction:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub "${AWS::StackName}-lambda"
-      Runtime: python3.12
-      Handler: lambda.index.handler # <dotted path>.<filename>.<handler_function>
-      Role: !GetAtt LambdaExecutionRole.Arn
-      Timeout: 15
+      Runtime: python3.14
+      Handler: lambda.register.main # <dotted path>.<filename>.<handler_function>
+      Role: !GetAtt RegisterLambdaExecutionRole.Arn
+      Timeout: 90
       MemorySize: 128
       Environment:
         Variables:
           FROM_ADMIN_EMAIL: !Ref FromAdminEmail
           TO_ADMIN_EMAIL: !If [HasToEmail, !Ref ToAdminEmail, ""]
           KMS_KEY_ID: !Ref RegistrationEncryptionKey
+          APPROVE_FUNCTION_NAME: !Ref ApproveFunction
 
-  # ── Function URL — public HTTPS endpoint  ──────────────────────────────────
+  # ── Registration Lambda function URL — public HTTPS endpoint  ──────────────────────────────────
   RegistrationFunctionUrl:
     Type: AWS::Lambda::Url
     Properties:
@@ -73,12 +83,20 @@ Resources:
               AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
             Action: "kms:*"
             Resource: "*"
-          - Sid: AllowLambdaUsage
+          - Sid: AllowRegisterLambdaUsage
             Effect: Allow
             Principal:
-              AWS: !GetAtt LambdaExecutionRole.Arn
+              AWS: !GetAtt RegisterLambdaExecutionRole.Arn
             Action:
               - kms:Encrypt
+              - kms:Decrypt
+              - kms:DescribeKey
+            Resource: "*"
+          - Sid: AllowApproveLambdaDecrypt
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt ApproveLambdaExecutionRole.Arn
+            Action:
               - kms:Decrypt
               - kms:DescribeKey
             Resource: "*"
@@ -89,8 +107,8 @@ Resources:
       AliasName: "alias/home-cloud-registration-encryption-key"
       TargetKeyId: !Ref RegistrationEncryptionKey
 
-  # ── IAM ────────────────────────────────────────────────────────────────────
-  LambdaExecutionRole:
+  # ── IAM roles and policies for the register function ───────────────────────
+  RegisterLambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -103,7 +121,7 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
-  LambdaSesPolicy:
+  RegisterLambdaSesPolicy:
     Type: AWS::IAM::Policy
     Properties:
       PolicyName: !Sub "${AWS::StackName}-ses-policy"
@@ -114,7 +132,20 @@ Resources:
             Action: ses:SendEmail
             Resource: "*"
       Roles:
-        - !Ref LambdaExecutionRole
+        - !Ref RegisterLambdaExecutionRole
+
+  RegisterLambdaInvokeApprovePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub "${AWS::StackName}-invoke-approve-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !GetAtt ApproveFunction.Arn
+      Roles:
+        - !Ref RegisterLambdaExecutionRole
 
   # ── SES identities (must be verified in sandbox mode) ─────────────────────
   FromAdminEmailIdentity:
@@ -127,6 +158,93 @@ Resources:
     Condition: HasToEmail
     Properties:
       EmailIdentity: !Ref ToAdminEmail
+
+
+
+  # ── Approve Lambda — container image with Tailscale ────────────────────────
+  ApproveFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-approve"
+      PackageType: Image
+      Handler: lambda-approve.approver.main
+      Code:
+        ImageUri: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ApproveLambdaEcrRepository}:latest"
+      Role: !GetAtt ApproveLambdaExecutionRole.Arn
+      Timeout: 60
+      MemorySize: 128
+      Environment:
+        Variables:
+          KMS_KEY_ID: !Ref RegistrationEncryptionKey
+          API_BASE_URL: !Ref ApproveApiBaseUrl
+          API_USERNAME: !Ref ApproveApiUsername
+          TAILSCALE_AUTHKEY_ARN: !Ref TailscaleAuthKeySecret
+          ADMIN_API_PASSWORD_ARN: !Ref AdminApiPasswordSecret
+
+  # ── Secrets Manager secrets (populated manually after deploy) ───────────────
+  TailscaleAuthKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${AWS::StackName}/tailscale-auth-key"
+      Description: >
+        Tailscale ephemeral auth key (tskey-auth-...). Update this value in
+        the AWS Console or CLI after the stack is deployed. The Lambda function
+        fetches it at runtime, not stored as a lambda environment variables.
+
+  AdminApiPasswordSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${AWS::StackName}/admin-api-password"
+      Description: >
+        Basic auth password for the registration API. Update this value in
+        the AWS Console or CLI after the stack is deployed. The Lambda function
+        fetches it at runtime, not stored as a lambda environment variables.
+
+  # ── IAM roles and policies for the approval function ───────────────────────
+  ApproveLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  ApproveLambdaEcrPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub "${AWS::StackName}-approve-ecr-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - ecr:GetDownloadUrlForLayer
+              - ecr:BatchGetImage
+              - ecr:GetAuthorizationToken
+            Resource: "*"
+      Roles:
+        - !Ref ApproveLambdaExecutionRole
+
+  ApproveLambdaSecretsPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub "${AWS::StackName}-approve-secrets-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource:
+              - !Ref TailscaleAuthKeySecret
+              - !Ref AdminApiPasswordSecret
+      Roles:
+        - !Ref ApproveLambdaExecutionRole
 
 Outputs:
   RegistrationUrl:

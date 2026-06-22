@@ -55,6 +55,7 @@
       "Action": [
         "kms:CreateKey",
         "kms:CreateAlias",
+        "kms:ListAliases",
         "kms:DeleteAlias",
         "kms:ScheduleKeyDeletion",
         "kms:DescribeKey",
@@ -101,6 +102,35 @@
         "logs:CreateLogGroup"
       ],
       "Resource": "arn:aws:logs:*:*:log-group:/aws/lambda/home-cloud-registration*"
+    },
+    {
+      "Sid": "ECRRepository",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:CreateRepository",
+        "ecr:DeleteRepository",
+        "ecr:DescribeRepositories",
+        "ecr:SetRepositoryPolicy",
+        "ecr:PutImageScanningConfiguration",
+        "ecr:PutImageTagMutability",
+        "ecr:PutLifecyclePolicy",
+        "ecr:TagResource",
+        "ecr:UntagResource"
+      ],
+      "Resource": "arn:aws:ecr:*:*:repository/home-cloud-registration*"
+    },
+    {
+      "Sid": "SecretsManager",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:CreateSecret",
+        "secretsmanager:PutSecretValue",
+        "secretsmanager:GetSecretValue",
+        "secretsmanager:DeleteSecret",
+        "secretsmanager:TagResource",
+        "secretsmanager:DescribeSecret"
+      ],
+      "Resource": "arn:aws:secretsmanager:*:*:secret:home-cloud-registration*"
     }
   ]
 }

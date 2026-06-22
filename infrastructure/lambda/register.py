@@ -1,4 +1,5 @@
 import os
+import json
 import base64
 import urllib.parse
 from pathlib import Path
@@ -8,16 +9,18 @@ from botocore.exceptions import ClientError
 
 ses = boto3.client("ses")
 kms = boto3.client("kms")
+lmbd = boto3.client("lambda")
 
 FROM_ADMIN_EMAIL = os.environ["FROM_ADMIN_EMAIL"]
 TO_ADMIN_EMAIL = os.environ.get("TO_ADMIN_EMAIL", "") or FROM_ADMIN_EMAIL
 KMS_KEY_ID = os.environ["KMS_KEY_ID"]
+APPROVE_FUNCTION_NAME = os.environ.get("APPROVE_FUNCTION_NAME", "")
 
 # Read the HTML once at cold start
 REGISTRATION_HTML = (Path(__file__).parent / "register.html").read_text()
 
 
-def handler(event, context):
+def main(event, context):
     method = event["requestContext"]["http"]["method"]
     path = event["rawPath"]
     print(f"Received {method} request for {path}")
@@ -29,10 +32,10 @@ def handler(event, context):
         return handle_registration(event)
 
     if method == "GET" and path == "/approve":
-        return handle_approve(event)
+        return handle_approval(event, "approve")
 
     if method == "GET" and path == "/deny":
-        return handle_deny(event)
+        return handle_approval(event, "deny")
 
     return html_response(404, "<h1>404 — Not Found</h1>")
 
@@ -91,34 +94,64 @@ def handle_registration(event):
 
     return html_response(200, SUCCESS_HTML)
 
-def handle_approve(event):
+def handle_approval(event, action):
     params = urllib.parse.parse_qs(event.get("rawQueryString", ""))
     token = (params.get("token", [""])[0]).strip()
     user = (params.get("user", [""])[0]).strip()
 
-    email = decrypt_email(token)
-    if not email:
+    if not token or not user:
+        return html_response(400, "<h1>Missing parameters</h1>")
+
+    if not decrypt_email(token):
         return html_response(400, "<h1>Invalid or expired link</h1>")
 
-    return html_response(200, f"""
-        <h1>✅ Approved</h1>
-        <p>User <strong>{user}</strong> ({email}) has been approved.</p>
-        <p><em>TODO: create their WebDAV account and send credentials.</em></p>
-    """)
+    if action == "deny":
+        # TODO implement smtp email to requester
+        return html_response(200, f"""
+            <h1>❌ Denied</h1>
+            <p>User <strong>{user}</strong> ({email}) has been denied.</p>
+        """)
 
-def handle_deny(event):
-    params = urllib.parse.parse_qs(event.get("rawQueryString", ""))
-    token = (params.get("token", [""])[0]).strip()
-    user = (params.get("user", [""])[0]).strip()
+    return invoke_approve_function(token, user)
 
-    email = decrypt_email(token)
-    if not email:
-        return html_response(400, "<h1>Invalid or expired link</h1>")
+def invoke_approve_function(token, user):
+    """Invoke the approve Lambda synchronously and return its response."""
+    if not APPROVE_FUNCTION_NAME:
+        return html_response(500, "<h1>Approve function not configured</h1>")
 
-    return html_response(200, f"""
-        <h1>❌ Denied</h1>
-        <p>User <strong>{user}</strong> ({email}) has been denied.</p>
-    """)
+    payload = {
+        "queryStringParameters": {
+            "token": token,
+            "user": user,
+        }
+    }
+
+    try:
+        resp = lmbd.invoke(
+            FunctionName=APPROVE_FUNCTION_NAME,
+            InvocationType="RequestResponse",
+            Payload=json.dumps(payload),
+        )
+        body = resp["Payload"].read().decode()
+        status_code = resp.get("StatusCode", 200)
+
+        if status_code != 200 or resp.get("FunctionError"):
+            print(f"Approve Lambda error: {body}")
+            return html_response(502, "<h1>Approve function error</h1>")
+
+        # The approve Lambda returns a JSON response with statusCode and body.
+        result = json.loads(body)
+        return {
+            "statusCode": result.get("statusCode", 200),
+            "headers": {
+                "Content-Type": result.get("headers", {}).get("Content-Type", "text/html"),
+                "Cache-Control": "no-store",
+            },
+            "body": result.get("body", ""),
+        }
+    except Exception as exc:
+        print(f"Lambda invoke error: {exc}")
+        return html_response(500, "<h1>Failed to process request</h1>")
 
 # ── KMS helpers ──────────────────────────────────────────────────────────────
 
