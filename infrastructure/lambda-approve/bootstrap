@@ -42,6 +42,6 @@ echo "Tailscale connected"
 export ALL_PROXY=socks5://localhost:1055/
 
 # Start the Lambda Runtime Interface Client.
-# _HANDLER is set by Lambda (from the Handler function property) and tells the
-# RIE which Python function to invoke.
-exec ${FUNCTION_DIR}/python -m awslambdaric ${_HANDLER}
+# by making it the default command for the container runtime
+# and passing the function handler name as an argument to the runtime
+exec /usr/local/bin/python -m awslambdaric approver.main
