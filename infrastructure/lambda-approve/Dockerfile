@@ -14,8 +14,9 @@ RUN pip install uv
 RUN uv pip install --target ${FUNCTION_DIR} -r requirements.txt
 
 
-# Use an even slimer version of the base Python image to reduce the final image size
-FROM python:3.13.14-alpine3.23
+# Runtime image — must match the build stage's libc (glibc, not musl/Alpine)
+# so that compiled C extensions (awslambdaric's runtime_client) load correctly.
+FROM python:3.13-slim
 
 # Include global arg in this stage of the build
 ARG FUNCTION_DIR
