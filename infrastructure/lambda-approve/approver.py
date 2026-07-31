@@ -1,11 +1,12 @@
 import os
 import json
+import socket
+import struct
 import string
 import secrets
 import http.client
 import base64
 import urllib.parse
-import socks
 
 import boto3
 
@@ -77,19 +78,13 @@ def create_new_user(username, password):
     """POST credentials to the registration API on the tailnet.
 
     Routes through the Tailscale SOCKS5 proxy (localhost:1055) set up by the
-    bootstrap script.  Uses raw http.client + pysocks so that boto3 KMS calls
-    are NOT proxied.
+    bootstrap script.  Uses raw SOCKS5 handshake (pysocks is incompatible
+    with tailscaled's SOCKS5 implementation).
     """
     host, port, path = parse_url(API_BASE_URL)
     print(f"Connecting to {host}:{port}{path} via SOCKS5 proxy")
 
-    sock = socks.socksocket()
-    socks.set_default_proxy(socks.SOCKS5, "localhost", 1055)
-    try:
-        sock.connect((host, port))
-    except Exception as exc:
-        print(f"SOCKS5 connect failed: {type(exc).__name__}: {exc}")
-        raise
+    sock = socks5_connect("localhost", 1055, host, port)
 
     conn = http.client.HTTPConnection(host, port)
     conn.sock = sock
@@ -116,6 +111,32 @@ def create_new_user(username, password):
 
     print(f"API POST -> {status}: {body}")
     return status
+
+
+def socks5_connect(proxy_host, proxy_port, dest_host, dest_port, timeout=10):
+    """Create a TCP connection through a SOCKS5 proxy using raw sockets.
+
+    pysocks is incompatible with tailscaled's SOCKS5 implementation
+    (packet header parsing error), so we do the handshake manually.
+    """
+    sock = socket.create_connection((proxy_host, proxy_port), timeout=timeout)
+
+    # SOCKS5 greeting: version=5, 1 auth method, no-auth=0
+    sock.send(b"\x05\x01\x00")
+    resp = sock.recv(2)
+    if resp != b"\x05\x00":
+        raise ConnectionError(f"SOCKS5 auth failed: {resp.hex()}")
+
+    # SOCKS5 CONNECT: version=5, cmd=1(connect), rsv=0, atyp=1(IPv4)
+    addr = socket.inet_aton(dest_host)
+    port = struct.pack("!H", dest_port)
+    sock.send(b"\x05\x01\x00\x01" + addr + port)
+
+    resp = sock.recv(10)
+    if len(resp) < 2 or resp[1] != 0x00:
+        raise ConnectionError(f"SOCKS5 connect failed: {resp.hex()}")
+
+    return sock
 
 
 def parse_url(url):

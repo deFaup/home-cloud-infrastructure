@@ -1,3 +1,2 @@
 awslambdaric
 boto3
-pysocks
