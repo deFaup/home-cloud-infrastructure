@@ -110,6 +110,7 @@
         "ecr:CreateRepository",
         "ecr:DeleteRepository",
         "ecr:DescribeRepositories",
+        "ecr:GetRepositoryPolicy",
         "ecr:SetRepositoryPolicy",
         "ecr:PutImageScanningConfiguration",
         "ecr:PutImageTagMutability",

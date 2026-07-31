@@ -14,17 +14,18 @@ ${FUNCTION_DIR}/tailscaled \
   --state=/tmp/tailscale/tailscaled.state &
 TS_PID=$!
 
+# Fetch the Tailscale auth key from SSM Parameter Store and write it to disk.
+# This must happen before tailscale up, so we do it here rather than in the
+# Lambda handler (which starts after tailscale is already connected).
+echo "Fetching Tailscale auth key"
+python ${FUNCTION_DIR}/fetch_authkey.py
+
 # Wait for tailscaled to create its state file.
 TRIES=0
 while [ ! -f /tmp/tailscale/tailscaled.state ] && [ $TRIES -lt 30 ]; do
   sleep 0.1
   TRIES=$((TRIES + 1))
 done
-
-# Fetch the Tailscale auth key from SSM Parameter Store and write it to disk.
-# This must happen before tailscale up, so we do it here rather than in the
-# Lambda handler (which starts after tailscale is already connected).
-${FUNCTION_DIR}/python ${FUNCTION_DIR}/fetch_authkey.py
 
 # Connect this node to the tailnet using the ephemeral key from SSM.
 ${FUNCTION_DIR}/tailscale up \
@@ -37,9 +38,11 @@ rm -f /tmp/tailscale-authkey
 
 echo "Tailscale connected"
 
-# ALL_PROXY tells the Python handler to route HTTP requests through the
-# Tailscale SOCKS5 proxy so they reach nodes on the tailnet.
-export ALL_PROXY=socks5://localhost:1055/
+# NOTE: We intentionally do NOT set ALL_PROXY here. The Python handler
+# (approver.py) routes API calls through the Tailscale SOCKS5 proxy
+# explicitly via pysocks. Setting ALL_PROXY would break:
+#   - awslambdaric (can't reach the Lambda Runtime API on localhost)
+#   - boto3 (KMS/SecretsManager calls would go through the proxy)
 
 # Start the Lambda Runtime Interface Client.
 # by making it the default command for the container runtime

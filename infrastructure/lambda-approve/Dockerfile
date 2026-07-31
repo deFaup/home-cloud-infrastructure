@@ -29,7 +29,8 @@ COPY --from=docker.io/tailscale/tailscale:stable /usr/local/bin/tailscaled ${FUN
 COPY --from=docker.io/tailscale/tailscale:stable /usr/local/bin/tailscale ${FUNCTION_DIR}/tailscale
 
 # Create symlinks so Tailscale can write state to /tmp (writable in Lambda).
-RUN mkdir -p /var/run && ln -s /tmp/tailscale /var/run/tailscale && \
+RUN mkdir -p /tmp/tailscale && \
+    mkdir -p /var/run && ln -s /tmp/tailscale /var/run/tailscale && \
     mkdir -p /var/cache && ln -s /tmp/tailscale /var/cache/tailscale && \
     mkdir -p /var/lib && ln -s /tmp/tailscale /var/lib/tailscale
 

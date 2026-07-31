@@ -164,12 +164,14 @@ Resources:
   # ── Approve Lambda — container image with Tailscale ────────────────────────
   ApproveFunction:
     Type: AWS::Lambda::Function
+    DependsOn: ApproveLambdaEcrPolicy
     Properties:
       FunctionName: !Sub "${AWS::StackName}-approve"
       PackageType: Image
-      Handler: lambda-approve.approver.main
+      Architectures:
+        - arm64 # Use - x86_64 if building on an x86 machine
       Code:
-        ImageUri: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ApproveLambdaEcrRepository}:latest"
+        ImageUri: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/home-cloud-registration-approve:latest"
       Role: !GetAtt ApproveLambdaExecutionRole.Arn
       Timeout: 60
       MemorySize: 128

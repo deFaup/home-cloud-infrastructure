@@ -1,5 +1,4 @@
-# Infrastructure — Deployment Guide
-
+# Infrastructure
 ## Architecture
 
 ```
@@ -55,19 +54,24 @@ Admin clicks  ──────────►  Registration Lambda (/approve o
 | Lambda Function URL | Free (included with Lambda) | **$0** |
 | Lambda | 1 M requests + 400K GB-seconds/month (12 months) | ~$0 after free tier |
 | SES | 62K emails/month (from Lambda) | ~$0 |
-| KMS | 20K free requests/month | ~$0 |
+| KMS | $0.03/10K requests | ~$0 |
+| S3 | $0.023 per GB | ~0$ |
+| Secrets Manager | $0.40 per Secret + $0.05 per 10000 API Requests | ~1$ |
+
+KMS Key that are customer managed cost 1$/month. AWS managed keys are free however.
+Secrets manager resources are also not free,
 
 > **Reminder:** CloudFormation itself is free. You only pay for the resources it creates. All resources here stay within the AWS free tier.
 
 ---
 
-## Pre-requisites
+# Deployment Pre-requisites
 
 1. **AWS CLI** configured with credentials (see next section)
 2. **Tailscale auth key** — generate an ephemeral auth key at https://login.tailscale.com/admin/settings/keys. Use an ephemeral key so Lambda nodes are cleaned up automatically. If device approval is enabled, pre-approve the key. You'll set this in Secrets Manager after the stack is deployed.
 3. **Docker** with buildx plugin — required to build the approve Lambda container image.
 
-### Authenticate in AWS
+## Authenticate in AWS
 
 To authenticate with aws in the aws-cli do the following:
 - authenticate in your aws account as root user with your email and password
@@ -75,7 +79,9 @@ To authenticate with aws in the aws-cli do the following:
 - enter the aws region closest to you (us-east-1, etc.)
 - in your browser find the new aws tab opened and select the account you want to authenticate with
 
-If successfull the page will show "Your credentials have been shared successfully and can be used until your session expires. You can now close this tab." and in your terminal will show "Updated profile default to use arn:aws:iam::<AWS_ACCOUNT_ID>:root credentials."
+If successfull the page will show "Your credentials have been shared successfully and can be used until your session expires. You can now close this tab." 
+Note: You might also see a page with the following error "This site can’t be reached. 127.0.0.1 refused to connect."
+Your terminal will show "Updated profile default to use arn:aws:iam::<AWS_ACCOUNT_ID>:root credentials."
 
 The region you entered is the region where aws resources will be deployed. **Make sure to set your region in the AWS website to the same one** (click on the arrow down in-between the settings icon and your profile name on the right of the top banner).
 
@@ -93,6 +99,7 @@ To log out later simply run
 # Deployments steps
 Run this every time
 ```bash
+aws login --profile admin
 ACCOUNT_ID=$(aws sts get-caller-identity --profile admin --query Account --output text)
 ```
 
@@ -185,6 +192,15 @@ docker buildx build --provenance=false \
 docker push ${ECR_URI}:latest
 ```
 
+If you ever need to update your ECR image you can repeat those steps beside the 1st one which becomes:
+```bash
+AWS_REGION=us-east-1 # replace with your region
+ECR_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/home-cloud-registration-approve"
+```
+
+You must replace the AWS_REGION= with your own. You can also find the full string on aws at Amazon ECR > Private registry > Repositories
+Make sure to remove the older image as well.
+
 ---
 
 ## Package
@@ -240,6 +256,7 @@ environment variables or visible via `lambda:GetFunction`.
 
 ## Delete the stack
 > aws cloudformation delete-stack --profile admin --stack-name home-cloud-registration
+
 Run the wait command if you want to re-create the stack
 > aws cloudformation wait stack-delete-complete --profile admin --stack-name home-cloud-registration 
 
