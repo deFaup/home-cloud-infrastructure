@@ -68,10 +68,10 @@ Secrets manager resources are also not free,
 # Deployment Pre-requisites
 
 1. **AWS CLI** configured with credentials (see next section)
-2. **Tailscale auth key** — generate an ephemeral auth key at https://login.tailscale.com/admin/settings/keys. Use an ephemeral key so Lambda nodes are cleaned up automatically. If device approval is enabled, pre-approve the key. You'll set this in Secrets Manager after the stack is deployed.
+2. **Tailscale auth key** — generate a ephemeral auth key at https://login.tailscale.com/admin/settings/keys. Make sure to set it as "reusable". Ephemeral keys have the benefits of removing the lambda node once it goes offline. If device approval is enabled, pre-approve the key. You'll set this in Secrets Manager after the stack is deployed.
 3. **Docker** with buildx plugin — required to build the approve Lambda container image.
 
-## Authenticate in AWS
+## AWS CLI configuration
 
 To authenticate with aws in the aws-cli do the following:
 - authenticate in your aws account as root user with your email and password
@@ -97,6 +97,7 @@ To log out later simply run
 ---
 
 # Deployments steps
+
 Run this every time
 ```bash
 aws login --profile admin
@@ -164,7 +165,7 @@ Create an S3 bucket for your deployment.
 > `YOUR_DEPLOY_BUCKET=home-cloud-bucket`
 > `aws s3 mb s3://$YOUR_DEPLOY_BUCKET --profile admin`
 
-You can always delete it later without breaking the page. If you decide to make an update you can simply re-create it.
+You can always delete it later without breaking the registration page. If you decide to make an update you can simply re-create it.
 > `aws s3 rb s3://$YOUR_DEPLOY_BUCKET --profile admin`
 
 ---
@@ -174,7 +175,7 @@ You can always delete it later without breaking the page. If you decide to make 
 # Create an ECR (elastic container) repository
 ECR_URI=$(aws ecr create-repository \
   --profile admin \
-  --repository-name home-cloud-registration-approve \
+  --repository-name home-cloud-ecr-repo \
   --query 'repository.repositoryUri' \
   --output text)
 
@@ -195,7 +196,7 @@ docker push ${ECR_URI}:latest
 If you ever need to update your ECR image you can repeat those steps beside the 1st one which becomes:
 ```bash
 AWS_REGION=us-east-1 # replace with your region
-ECR_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/home-cloud-registration-approve"
+ECR_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/home-cloud-ecr-repo"
 ```
 
 You must replace the AWS_REGION= with your own. You can also find the full string on aws at Amazon ECR > Private registry > Repositories
@@ -221,7 +222,7 @@ aws cloudformation package \
 aws cloudformation deploy \
   --profile admin \
   --template-file infrastructure/packaged.yaml \
-  --stack-name home-cloud-registration \
+  --stack-name home-cloud \
   --parameter-overrides \
     FromAdminEmail=admin@test.com \
     ToAdminEmail=admin2@test.com \
@@ -241,26 +242,44 @@ update them with your real values:
 # Tailscale auth key
 aws secretsmanager put-secret-value \
   --profile admin \
-  --secret-id "home-cloud-registration/tailscale-auth-key" \
+  --secret-id "home-cloud/tailscale-auth-key" \
   --secret-string "tskey-auth-YOUR-KEY"
 
-# API password for Basic auth on the registration API
+# API password for Basic auth on the webdav server admin API
 aws secretsmanager put-secret-value \
   --profile admin \
-  --secret-id "home-cloud-registration/admin-api-password" \
+  --secret-id "home-cloud/admin-api-password" \
   --secret-string "your-admin-api-password"
 ```
 
 The approve Lambda fetches both values from Secrets Manager at cold start — they are never stored in
 environment variables or visible via `lambda:GetFunction`.
 
-## Delete the stack
-> aws cloudformation delete-stack --profile admin --stack-name home-cloud-registration
+---
+
+# Delete the stack
+> aws cloudformation delete-stack --profile admin --stack-name home-cloud
 
 Run the wait command if you want to re-create the stack
-> aws cloudformation wait stack-delete-complete --profile admin --stack-name home-cloud-registration 
+> aws cloudformation wait stack-delete-complete --profile admin --stack-name home-cloud 
 
-This removes all resources created by the stack (Lambda, Function URL, KMS key, IAM role). SES email identity must be removed separately if no longer needed. S3 bucket content must be deleted separetly. Same for the ECR repo and image.
+This removes all resources created by the stack (Lambda, Function URL, KMS key, IAM role). S3 bucket and content must be deleted separetly. Same for the ECR repo and images.
+
+> aws ecr delete-repository --profile admin --repository-name home-cloud-ecr-repo --force
+
+> aws s3 rb s3://$YOUR_DEPLOY_BUCKET --profile admin --force
+
+Finally remove the deployer role and policy (delete all versions if more than one present).
+```bash
+aws iam detach-role-policy \
+  --profile admin \
+  --role-name home-cloud-deployer-role \
+  --policy-arn arn:aws:iam::$ACCOUNT_ID:policy/home-cloud-deployer-policy
+aws iam list-policy-versions --profile admin --policy-arn arn:aws:iam::$ACCOUNT_ID:policy/home-cloud-deployer-policy --output text --query 'Versions[?IsDefaultVersion==`false`].VersionId' | \
+  xargs -I {} aws iam delete-policy-version --profile admin --policy-arn arn:aws:iam::$ACCOUNT_ID:policy/home-cloud-deployer-policy --version-id {}
+aws iam delete-policy --profile admin --policy-arn arn:aws:iam::$ACCOUNT_ID:policy/home-cloud-deployer-policy
+aws iam delete-role --profile admin --role-name home-cloud-deployer-role
+```
 
 ---
 
@@ -306,7 +325,7 @@ in any Lambda environment variable or CloudFormation parameter. At cold start:
 
 ```bash
 aws cloudformation describe-stacks \
-  --stack-name home-cloud-registration \
+  --stack-name home-cloud \
   --query 'Stacks[0].Outputs[?OutputKey==`RegistrationUrl`].OutputValue' \
   --output text
 ```
@@ -328,7 +347,7 @@ Edit `template.yaml` or `lambda/` files, then re-run the package + deploy comman
 **Updating the approve Lambda image:** If you change files in `lambda-approve/`, rebuild and push the Docker image, then update the Lambda function code:
 
 ```bash
-ECR_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/home-cloud-registration-approve"
+ECR_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/home-cloud-ecr-repo"
 docker buildx build --provenance=false \
   -t ${ECR_URI}:latest \
   -f infrastructure/lambda-approve/Dockerfile \
@@ -338,7 +357,7 @@ docker push ${ECR_URI}:latest
 # Force Lambda to use the new image
 aws lambda update-function-code \
   --profile admin \
-  --function-name home-cloud-registration-approve \
+  --function-name home-cloud-create-user-lambda \
   --image-uri ${ECR_URI}:latest \
   --publish
 ```

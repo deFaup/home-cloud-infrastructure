@@ -12,7 +12,7 @@
         "cloudformation:DescribeStackEvents",
         "cloudformation:GetTemplate"
       ],
-      "Resource": "arn:aws:cloudformation:*:*:stack/home-cloud-registration/*"
+      "Resource": "arn:aws:cloudformation:*:*:stack/home-cloud/*"
     },
     {
       "Sid": "Lambda",
@@ -30,7 +30,7 @@
         "lambda:RemovePermission",
         "lambda:InvokeFunctionUrl"
       ],
-      "Resource": "arn:aws:lambda:*:*:function:home-cloud-registration*"
+      "Resource": "arn:aws:lambda:*:*:function:home-cloud*"
     },
     {
       "Sid": "IAMRoleForLambda",
@@ -47,7 +47,7 @@
         "iam:PassRole",
         "iam:TagRole"
       ],
-      "Resource": "arn:aws:iam::*:role/home-cloud-registration*"
+      "Resource": "arn:aws:iam::*:role/home-cloud*"
     },
     {
       "Sid": "KMSKey",
@@ -101,7 +101,7 @@
       "Action": [
         "logs:CreateLogGroup"
       ],
-      "Resource": "arn:aws:logs:*:*:log-group:/aws/lambda/home-cloud-registration*"
+      "Resource": "arn:aws:logs:*:*:log-group:/aws/lambda/home-cloud*"
     },
     {
       "Sid": "ECRRepository",
@@ -118,7 +118,7 @@
         "ecr:TagResource",
         "ecr:UntagResource"
       ],
-      "Resource": "arn:aws:ecr:*:*:repository/home-cloud-registration*"
+      "Resource": "arn:aws:ecr:*:*:repository/home-cloud*"
     },
     {
       "Sid": "SecretsManager",
@@ -131,7 +131,7 @@
         "secretsmanager:TagResource",
         "secretsmanager:DescribeSecret"
       ],
-      "Resource": "arn:aws:secretsmanager:*:*:secret:home-cloud-registration*"
+      "Resource": "arn:aws:secretsmanager:*:*:secret:home-cloud*"
     }
   ]
 }

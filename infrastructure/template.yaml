@@ -32,7 +32,7 @@ Resources:
   RegistrationFunction:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: !Sub "${AWS::StackName}-lambda"
+      FunctionName: !Sub "${AWS::StackName}-registration-lambda"
       Runtime: python3.14
       Handler: lambda.register.main # <dotted path>.<filename>.<handler_function>
       Role: !GetAtt RegisterLambdaExecutionRole.Arn
@@ -43,7 +43,7 @@ Resources:
           FROM_ADMIN_EMAIL: !Ref FromAdminEmail
           TO_ADMIN_EMAIL: !If [HasToEmail, !Ref ToAdminEmail, ""]
           KMS_KEY_ID: !Ref RegistrationEncryptionKey
-          APPROVE_FUNCTION_NAME: !Ref ApproveFunction
+          APPROVE_FUNCTION_NAME: !Ref CreateUserFunction
 
   # ── Registration Lambda function URL — public HTTPS endpoint  ──────────────────────────────────
   RegistrationFunctionUrl:
@@ -92,10 +92,10 @@ Resources:
               - kms:Decrypt
               - kms:DescribeKey
             Resource: "*"
-          - Sid: AllowApproveLambdaDecrypt
+          - Sid: AllowCreateUserLambdaDecrypt
             Effect: Allow
             Principal:
-              AWS: !GetAtt ApproveLambdaExecutionRole.Arn
+              AWS: !GetAtt CreateUserLambdaExecutionRole.Arn
             Action:
               - kms:Decrypt
               - kms:DescribeKey
@@ -104,7 +104,7 @@ Resources:
   RegistrationEncryptionKeyAlias:
     Type: AWS::KMS::Alias
     Properties:
-      AliasName: "alias/home-cloud-registration-encryption-key"
+      AliasName: "alias/home-cloud-encryption-key"
       TargetKeyId: !Ref RegistrationEncryptionKey
 
   # ── IAM roles and policies for the register function ───────────────────────
@@ -124,7 +124,7 @@ Resources:
   RegisterLambdaSesPolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: !Sub "${AWS::StackName}-ses-policy"
+      PolicyName: !Sub "${AWS::StackName}-register-ses-policy"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -137,13 +137,13 @@ Resources:
   RegisterLambdaInvokeApprovePolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: !Sub "${AWS::StackName}-invoke-approve-policy"
+      PolicyName: !Sub "${AWS::StackName}-register-invoke-lambda--policy"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Action: lambda:InvokeFunction
-            Resource: !GetAtt ApproveFunction.Arn
+            Resource: !GetAtt CreateUserFunction.Arn
       Roles:
         - !Ref RegisterLambdaExecutionRole
 
@@ -161,18 +161,18 @@ Resources:
 
 
 
-  # ── Approve Lambda — container image with Tailscale ────────────────────────
-  ApproveFunction:
+  # ── CreateUser Lambda — container image with Tailscale ────────────────────────
+  CreateUserFunction:
     Type: AWS::Lambda::Function
-    DependsOn: ApproveLambdaEcrPolicy
+    DependsOn: CreateUserLambdaEcrPolicy
     Properties:
-      FunctionName: !Sub "${AWS::StackName}-approve"
+      FunctionName: !Sub "${AWS::StackName}-create-user-lambda"
       PackageType: Image
       Architectures:
         - arm64 # Use - x86_64 if building on an x86 machine
       Code:
-        ImageUri: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/home-cloud-registration-approve:latest"
-      Role: !GetAtt ApproveLambdaExecutionRole.Arn
+        ImageUri: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/home-cloud-ecr-repo:latest"
+      Role: !GetAtt CreateUserLambdaExecutionRole.Arn
       Timeout: 60
       MemorySize: 128
       Environment:
@@ -203,7 +203,7 @@ Resources:
         fetches it at runtime, not stored as a lambda environment variables.
 
   # ── IAM roles and policies for the approval function ───────────────────────
-  ApproveLambdaExecutionRole:
+  CreateUserLambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -216,10 +216,10 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
-  ApproveLambdaEcrPolicy:
+  CreateUserLambdaEcrPolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: !Sub "${AWS::StackName}-approve-ecr-policy"
+      PolicyName: !Sub "${AWS::StackName}-create-user-ecr-policy"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -230,12 +230,12 @@ Resources:
               - ecr:GetAuthorizationToken
             Resource: "*"
       Roles:
-        - !Ref ApproveLambdaExecutionRole
+        - !Ref CreateUserLambdaExecutionRole
 
-  ApproveLambdaSecretsPolicy:
+  CreateUserLambdaSecretsPolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: !Sub "${AWS::StackName}-approve-secrets-policy"
+      PolicyName: !Sub "${AWS::StackName}-create-user-secrets-policy"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -246,7 +246,7 @@ Resources:
               - !Ref TailscaleAuthKeySecret
               - !Ref AdminApiPasswordSecret
       Roles:
-        - !Ref ApproveLambdaExecutionRole
+        - !Ref CreateUserLambdaExecutionRole
 
 Outputs:
   RegistrationUrl:
