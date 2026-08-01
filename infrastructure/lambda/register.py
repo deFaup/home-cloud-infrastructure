@@ -31,11 +31,8 @@ def main(event, context):
     if method == "POST" and path == "/":
         return handle_registration(event)
 
-    if method == "GET" and path == "/approve":
-        return handle_approval(event, "approve")
-
-    if method == "GET" and path == "/deny":
-        return handle_approval(event, "deny")
+    if method == "GET" and path == "/approver":
+        return handle_approval(event)
 
     return html_response(404, "<h1>404 — Not Found</h1>")
 
@@ -56,6 +53,7 @@ def handle_registration(event):
     if event.get("isBase64Encoded"):
         body = base64.b64decode(body).decode()
 
+    print("Received registration body:", body)
     params = urllib.parse.parse_qs(body)
     username = (params.get("username", [""])[0]).strip()
     email = (params.get("email", [""])[0]).strip()
@@ -65,11 +63,9 @@ def handle_registration(event):
 
     token = encrypt_email(email)
     base_url = get_base_url(event)
-    approve_url = f"{base_url}/approve?token={token}&user={urllib.parse.quote(username)}"
-    deny_url = f"{base_url}/deny?token={token}&user={urllib.parse.quote(username)}"
+    approve_url = f"{base_url}/approver?token={token}&user={urllib.parse.quote(username)}&approved=true"
+    deny_url = f"{base_url}/approver?token={token}&user={urllib.parse.quote(username)}&approved=false"
 
-    print("approve url: ", approve_url)
-    print("deny url: ", deny_url)
     email_body = (
         f"New registration request\n"
         f"────────────────────────\n"
@@ -94,22 +90,23 @@ def handle_registration(event):
 
     return html_response(200, SUCCESS_HTML)
 
-def handle_approval(event, action):
+def handle_approval(event):
     params = urllib.parse.parse_qs(event.get("rawQueryString", ""))
     token = (params.get("token", [""])[0]).strip()
     user = (params.get("user", [""])[0]).strip()
+    approved = (params.get("approved", [""])[0]).strip().lower()
 
-    if not token or not user:
+    if not token or not user or approved not in ("true", "false"):
         return html_response(400, "<h1>Missing parameters</h1>")
 
     if not decrypt_email(token):
         return html_response(400, "<h1>Invalid or expired link</h1>")
 
-    if action == "deny":
+    if approved == "false":
         # TODO implement smtp email to requester
         return html_response(200, f"""
             <h1>❌ Denied</h1>
-            <p>User <strong>{user}</strong> ({email}) has been denied.</p>
+            <p>User <strong>{user}</strong> has been denied.</p>
         """)
 
     return invoke_approve_function(token, user)
