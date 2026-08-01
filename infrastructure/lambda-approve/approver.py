@@ -66,8 +66,7 @@ def main(event, context):
         user = user + random_digits(2)
         result = create_new_user(user, password)
 
-    if result == 200:
-        print(f"Approved user {user}")
+    if result == 201:
         return html_response(200, APPROVE_HTML.format(user=user, password=password))
     else:
         print(f"API returned status {result} for user {user}")
