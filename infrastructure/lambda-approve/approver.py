@@ -34,42 +34,46 @@ ALPHANUMERIC = string.ascii_letters + string.digits
 
 
 def main(event, context):
-    """Handle approve/deny requests from the registration email links.
-
-    Called via Lambda Function URL with query parameters:
-      ?action=approve&token=<kms-encrypted-username>&user=<username>
-      ?action=deny&token=<kms-encrypted-username>&user=<username>
+    """Invoked by the approver Lambda.
+    If the encrypted token parameter is valid then a new user is created via the registration API on the tailnet.
+    Token decrypts to a JSON dict: {email, user, approved}.
     """
     params = event.get("queryStringParameters") or {}
-    action = params.get("action", "approve")
     token = params.get("token", "")
-    user = params.get("user", "")
 
     if not token:
         return html_response(400, "<h1>Missing token</h1>")
 
-    username = decrypt_token(token)
-    if not username:
+    data = decrypt_token(token)
+    if not data:
         return html_response(400, "<h1>Invalid or expired link</h1>")
 
-    if action != "approve":
+    user = data.get("user", "")
+    email = data.get("email", "")
+    approved = data.get("approved", "")
+
+    if not user or not email or approved not in ("true", "false"):
+        return html_response(400, "<h1>Invalid token payload</h1>")
+
+    if approved == "false":
         return html_response(200, DENY_HTML.format(user=user))
 
-    # action == "approve" (default)
     password = generate_password(16)
-    result = create_new_user(username, password)
+    result = create_new_user(user, password)
 
     # API returns 404 when the username is already taken.
     if result == 404:
-        username = username + random_digits(2)
-        result = create_new_user(username, password)
+        user = user + random_digits(2)
+        result = create_new_user(user, password)
 
     if result == 200:
-        print(f"Approved user {username}")
-        return html_response(200, APPROVE_HTML.format(user=username, password=password))
+        print(f"Approved user {user}")
+        return html_response(200, APPROVE_HTML.format(user=user, password=password))
     else:
-        print(f"API returned status {result} for user {username}")
+        print(f"API returned status {result} for user {user}")
         return html_response(502, f"<h1>Upstream API error ({result})</h1>")
+
+    # TODO - send email with user password and username
 
 
 # ── HTTP via Tailscale SOCKS5 proxy ─────────────────────────────────────────
@@ -154,12 +158,12 @@ def parse_url(url):
 # ── KMS helpers ──────────────────────────────────────────────────────────────
 
 def decrypt_token(token):
-    """Decrypt a KMS-encrypted URL-safe token. Returns plaintext or None."""
+    """Decrypt a KMS-encrypted URL-safe token. Returns dict or None."""
     try:
         padded = token + "=" * (-len(token) % 4)
         ciphertext = base64.urlsafe_b64decode(padded)
         resp = kms.decrypt(KeyId=KMS_KEY_ID, CiphertextBlob=ciphertext)
-        return resp["Plaintext"].decode()
+        return json.loads(resp["Plaintext"].decode())
     except Exception as exc:
         print(f"KMS decrypt error: {exc}")
         return None

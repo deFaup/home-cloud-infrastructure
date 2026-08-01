@@ -61,10 +61,11 @@ def handle_registration(event):
     if not username or not email:
         return html_response(400, "<h1>Missing fields</h1><p>Username and email are required.</p>")
 
-    token = encrypt_email(email)
     base_url = get_base_url(event)
-    approve_url = f"{base_url}/approver?token={token}&user={urllib.parse.quote(username)}&approved=true"
-    deny_url = f"{base_url}/approver?token={token}&user={urllib.parse.quote(username)}&approved=false"
+    approve_token = encrypt_token({"email": email, "user": username, "approved": "true"})
+    deny_token = encrypt_token({"email": email, "user": username, "approved": "false"})
+    approve_url = f"{base_url}/approver?token={approve_token}"
+    deny_url = f"{base_url}/approver?token={deny_token}"
 
     email_body = (
         f"New registration request\n"
@@ -91,27 +92,40 @@ def handle_registration(event):
     return html_response(200, SUCCESS_HTML)
 
 def handle_approval(event):
+    """Handle approve/deny requests from the registration email links.
+
+    Called via Lambda Function URL with query parameters:
+      ?token=<fernet-encrypted-payload>
+
+    The token decrypts to a JSON dict: {email, user, approved}.
+    """
     params = urllib.parse.parse_qs(event.get("rawQueryString", ""))
     token = (params.get("token", [""])[0]).strip()
-    user = (params.get("user", [""])[0]).strip()
-    approved = (params.get("approved", [""])[0]).strip().lower()
 
-    if not token or not user or approved not in ("true", "false"):
-        return html_response(400, "<h1>Missing parameters</h1>")
+    if not token:
+        return html_response(400, "<h1>Missing token</h1>")
 
-    if not decrypt_email(token):
+    data = decrypt_token(token)
+    if not data:
         return html_response(400, "<h1>Invalid or expired link</h1>")
+
+    user = data.get("user", "")
+    email = data.get("email", "")
+    approved = data.get("approved", "")
+
+    if not user or not email or approved not in ("true", "false"):
+        return html_response(400, "<h1>Invalid token payload</h1>")
 
     if approved == "false":
         # TODO implement smtp email to requester
         return html_response(200, f"""
             <h1>❌ Denied</h1>
-            <p>User <strong>{user}</strong> has been denied.</p>
+            <p>User <strong>{user}</strong> ({email}) has been denied.</p>
         """)
 
-    return invoke_approve_function(token, user)
+    return invoke_approve_function(token)
 
-def invoke_approve_function(token, user):
+def invoke_approve_function(token):
     """Invoke the approve Lambda synchronously and return its response."""
     if not APPROVE_FUNCTION_NAME:
         return html_response(500, "<h1>Approve function not configured</h1>")
@@ -119,7 +133,6 @@ def invoke_approve_function(token, user):
     payload = {
         "queryStringParameters": {
             "token": token,
-            "user": user,
         }
     }
 
@@ -152,24 +165,25 @@ def invoke_approve_function(token, user):
 
 # ── KMS helpers ──────────────────────────────────────────────────────────────
 
-def encrypt_email(email):
-    """Encrypt email with KMS, return URL-safe token."""
+def encrypt_token(payload):
+    """Encrypt a dict payload with KMS, return URL-safe token."""
     try:
-        resp = kms.encrypt(KeyId=KMS_KEY_ID, Plaintext=email.encode())
+        plaintext = json.dumps(payload).encode()
+        resp = kms.encrypt(KeyId=KMS_KEY_ID, Plaintext=plaintext)
         return base64.urlsafe_b64encode(resp["CiphertextBlob"]).rstrip(b"=").decode()
     except Exception as exc:
-        return html_response(500, "<h1>Email send failed</h1><p>Please try again later.</p>")
+        print(f"KMS encrypt error: {exc}")
+        return None
 
-def decrypt_email(token):
-    """Decrypt URL-safe token back to email. Returns None if invalid."""
+def decrypt_token(token):
+    """Decrypt URL-safe token back to dict. Returns None if invalid."""
     try:
-        # Restore base64 padding, then URL-safe decode to raw bytes
         padded = token + "=" * (-len(token) % 4)
         ciphertext = base64.urlsafe_b64decode(padded)
         resp = kms.decrypt(CiphertextBlob=ciphertext)
-        return resp["Plaintext"].decode()
+        return json.loads(resp["Plaintext"].decode())
     except Exception as exc:
-        print(f"KMS error: {exc}")
+        print(f"KMS decrypt error: {exc}")
         return None
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
