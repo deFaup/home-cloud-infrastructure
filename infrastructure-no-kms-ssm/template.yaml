@@ -1,0 +1,227 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Home Cloud Stack. Creates a lambda function that will serve as signup page (via a public lambda function URL).
+  Signup requires username and email address.
+  The page send the registration request by email (via SES) to the admin.
+  Included in that email are two links to an approve/deny lambda function.
+  Request to this lambda are authenticated using Fernet-encrypted user email address (present in the email to the admin).
+  The approve function creates the user account via a json API endpoint accessible over Tailscale.
+  Secrets are stored in SSM Parameter Store SecureString (created via setup script, not CloudFormation).
+
+Parameters:
+  FromAdminEmail:
+    Type: String
+    Description: Email address used as the sender (SES From). Must be a verified SES identity.
+  ToAdminEmail:
+    Type: String
+    Description: Email address that receives registration notifications (SES To). Defaults to FromAdminEmail if left empty.
+    Default: ""
+  ApproveApiBaseUrl:
+    Type: String
+    Description: >
+      Base URL of the Json API endpoint accessible on your Tailscale network
+      (e.g. http://my-server:3000 or http://100.x.y.z:3000).
+  ApproveApiUsername:
+    Type: String
+    Description: Username for Basic auth on the registration API.
+
+Conditions:
+  HasToEmail: !Not [!Equals [!Ref ToAdminEmail, ""]]
+
+Resources:
+  # ── Registration Lambda function ────────────────────────────────────────────────────────
+  RegistrationFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-registration-lambda"
+      Runtime: python3.14
+      Handler: lambda.register.main # <dotted path>.<filename>.<handler_function>
+      Role: !GetAtt RegisterLambdaExecutionRole.Arn
+      Timeout: 90
+      MemorySize: 128
+      Environment:
+        Variables:
+          FROM_ADMIN_EMAIL: !Ref FromAdminEmail
+          TO_ADMIN_EMAIL: !If [HasToEmail, !Ref ToAdminEmail, ""]
+          FERNET_KEY_PARAM: !Sub "/${AWS::StackName}/fernet-key"
+          APPROVE_FUNCTION_NAME: !Ref CreateUserFunction
+
+  # ── Registration Lambda function URL — public HTTPS endpoint  ──────────────────────────────────
+  RegistrationFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !Ref RegistrationFunction
+      AuthType: NONE
+
+  RegistrationFunctionUrlAllowPublicAccess:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunctionUrl
+      FunctionName: !Ref RegistrationFunction
+      FunctionUrlAuthType: NONE
+      Principal: "*"
+
+  RegistrationFunctionUrlAllowInvokeAction:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref RegistrationFunction
+      InvokedViaFunctionUrl: true
+      Principal: "*"
+
+  # ── IAM roles and policies for the register function ───────────────────────
+  RegisterLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  RegisterLambdaSesPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub "${AWS::StackName}-register-ses-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: ses:SendEmail
+            Resource: "*"
+      Roles:
+        - !Ref RegisterLambdaExecutionRole
+
+  RegisterLambdaInvokeApprovePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub "${AWS::StackName}-register-invoke-lambda-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !GetAtt CreateUserFunction.Arn
+      Roles:
+        - !Ref RegisterLambdaExecutionRole
+
+  RegisterLambdaSsmPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub "${AWS::StackName}-register-ssm-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - ssm:GetParameter
+            Resource:
+              - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/fernet-key"
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+            Resource: "*"
+            Condition:
+              StringEquals:
+                kms:ViaService: !Sub "ssm.${AWS::Region}.amazonaws.com"
+      Roles:
+        - !Ref RegisterLambdaExecutionRole
+
+  # ── SES identities (must be verified in sandbox mode) ─────────────────────
+  FromAdminEmailIdentity:
+    Type: AWS::SES::EmailIdentity
+    Properties:
+      EmailIdentity: !Ref FromAdminEmail
+
+  ToAdminEmailIdentity:
+    Type: AWS::SES::EmailIdentity
+    Condition: HasToEmail
+    Properties:
+      EmailIdentity: !Ref ToAdminEmail
+
+
+
+  # ── CreateUser Lambda — container image with Tailscale ────────────────────────
+  CreateUserFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: CreateUserLambdaEcrPolicy
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-create-user-lambda"
+      PackageType: Image
+      Architectures:
+        - arm64 # Use - x86_64 if building on an x86 machine
+      Code:
+        ImageUri: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/home-cloud-ecr-repo:latest"
+      Role: !GetAtt CreateUserLambdaExecutionRole.Arn
+      Timeout: 60
+      MemorySize: 128
+      Environment:
+        Variables:
+          FERNET_KEY_PARAM: !Sub "/${AWS::StackName}/fernet-key"
+          API_BASE_URL: !Ref ApproveApiBaseUrl
+          API_USERNAME: !Ref ApproveApiUsername
+          TAILSCALE_AUTHKEY_PARAM: !Sub "/${AWS::StackName}/tailscale-auth-key"
+          ADMIN_API_PASSWORD_PARAM: !Sub "/${AWS::StackName}/admin-api-password"
+
+  # ── IAM roles and policies for the approval function ───────────────────────
+  CreateUserLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  CreateUserLambdaEcrPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub "${AWS::StackName}-create-user-ecr-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - ecr:GetDownloadUrlForLayer
+              - ecr:BatchGetImage
+              - ecr:GetAuthorizationToken
+            Resource: "*"
+      Roles:
+        - !Ref CreateUserLambdaExecutionRole
+
+  CreateUserLambdaSsmPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub "${AWS::StackName}-create-user-ssm-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - ssm:GetParameter
+            Resource:
+              - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/fernet-key"
+              - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/tailscale-auth-key"
+              - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/admin-api-password"
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+            Resource: "*"
+            Condition:
+              StringEquals:
+                kms:ViaService: !Sub "ssm.${AWS::Region}.amazonaws.com"
+      Roles:
+        - !Ref CreateUserLambdaExecutionRole
+
+Outputs:
+  RegistrationUrl:
+    Description: Public URL of the registration page — share this with users.
+    Value: !GetAtt RegistrationFunctionUrl.FunctionUrl

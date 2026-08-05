@@ -1,0 +1,55 @@
+#!/bin/sh
+set -eu
+FUNCTION_DIR="/function"
+
+# Create /tmp/tailscale directory for Tailscale state (symlinked from /var/*).
+mkdir -p /tmp/tailscale
+
+# Start Tailscale daemon in userspace networking mode with a SOCKS5 proxy.
+# Userspace networking is required because Lambda does not provide /dev/net/tun.
+${FUNCTION_DIR}/tailscaled \
+  --tun=userspace-networking \
+  --socks5-server=localhost:1055 \
+  --state=/tmp/tailscale/tailscaled.state &
+TS_PID=$!
+
+# Fetch the Tailscale auth key from SSM Parameter Store and write it to disk.
+python ${FUNCTION_DIR}/fetch_authkey.py
+
+# Wait for tailscaled to create its state file.
+TRIES=0
+while [ ! -f /tmp/tailscale/tailscaled.state ] && [ $TRIES -lt 30 ]; do
+  sleep 0.1
+  TRIES=$((TRIES + 1))
+done
+
+# Connect this node to the tailnet using the ephemeral key from SSM.
+${FUNCTION_DIR}/tailscale up \
+  --auth-key=$(cat /tmp/tailscale-authkey) \
+  --hostname=lambda-approve \
+  --accept-routes
+
+# Clean up the key file — it is no longer needed.
+rm -f /tmp/tailscale-authkey
+
+# Wait for Tailscale to come online (up to 15 seconds).
+TRIES=0
+while [ $TRIES -lt 15 ]; do
+  TS_STATE=$(${FUNCTION_DIR}/tailscale status --json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('BackendState',''))" 2>/dev/null || echo "")
+  if [ "$TS_STATE" = "Running" ]; then
+    echo "Tailscale online"
+    break
+  fi
+  echo "Waiting for Tailscale (state=${TS_STATE})..."
+  sleep 1
+  TRIES=$((TRIES + 1))
+done
+
+# NOTE: We intentionally do NOT set ALL_PROXY here. The Python handler
+# (approver.py) routes API calls through the Tailscale SOCKS5 proxy
+# explicitly via raw sockets. Setting ALL_PROXY would break:
+#   - awslambdaric (can't reach the Lambda Runtime API on localhost)
+#   - boto3 (SSM calls would go through the proxy)
+
+# Start the Lambda Runtime Interface Client.
+exec /usr/local/bin/python -m awslambdaric approver.main
