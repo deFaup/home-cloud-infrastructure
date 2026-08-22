@@ -5,6 +5,10 @@ import urllib.parse
 from pathlib import Path
 
 import boto3
+import sys
+sys.path.insert(0, './packages')
+
+from cryptography.fernet import Fernet
 from botocore.exceptions import ClientError
 from cryptography.fernet import Fernet
 

@@ -1,0 +1,9 @@
+# Python packages installed via `pip install -t`
+# These are bundled into the Lambda deployment package at build time.
+# cryptography/
+# cffi/
+# pycparser/
+# *.so
+# *.dist-info/
+# cffi-gen-src
+lambda-registration/packages/

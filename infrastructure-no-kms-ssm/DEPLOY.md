@@ -236,15 +236,26 @@ Make sure to remove the older image as well.
 ---
 
 ## Package
-This uploads the Lambda code and HTML page to S3. It creates a new yaml template which includes a reference to the files in S3 (search for "S3Key" in file 'infrastructure-no-kms-ssm/packaged.yaml')
+The "Register" Lambda function’s code comprises of the main 'register.py' file containing the function’s handler code, as well as additional packages and modules the code depends on AND the static HTML page. Because of these we must first create a deployment package in order to deploy this function code to Lambda. We create the package as a `.zip` file. 
+When creating the lambda we have the choice of:
+- using the CLI and attaching the zip in the create command OR
+- use cloudformation in which case the zip file must be uploaded to S3 first
 
+Alternatively you can use the cloudformation package command which zips the whole directory where the template lives, uploads that to S3 and finally creates a new template where the lambda now has Code.S3Bucket and Code.S3Key fields pointing to the uploaded zip file."
+
+Install cryptography library then package all files and upload it to S3 with name `registration.zip`.
 ```bash
-YOUR_DEPLOY_BUCKET=home-cloud-bucket
-aws cloudformation package \
-  --template-file infrastructure-no-kms-ssm/template.yaml \
-  --s3-bucket $YOUR_DEPLOY_BUCKET \
-  --output-template-file infrastructure-no-kms-ssm/packaged.yaml \
-  --profile admin
+mkdir -p infrastructure-no-kms-ssm/lambda-registration/packages
+pip install "cryptography" --target infrastructure-no-kms-ssm/lambda-registration/packages/ --quiet
+cd infrastructure-no-kms-ssm/lambda-registration/ && zip -r ../registration.zip . && cd -
+aws s3 cp infrastructure-no-kms-ssm/registration.zip s3://${YOUR_DEPLOY_BUCKET} --profile admin
+rm infrastructure-no-kms-ssm/registration.zip
+# YOUR_DEPLOY_BUCKET=home-cloud-bucket
+# aws cloudformation package \
+#   --template-file infrastructure-no-kms-ssm/template.yaml \
+#   --s3-bucket $YOUR_DEPLOY_BUCKET \
+#   --output-template-file infrastructure-no-kms-ssm/packaged.yaml \
+#   --profile admin
 ```
 
 ## Deploy
@@ -259,10 +270,11 @@ aws cloudformation deploy \
     ToAdminEmail=admin2@test.com \
     ApproveApiBaseUrl=http://your-server:3000 \
     ApproveApiUsername=admin \
+    Architecture=x86_64 \
   --capabilities CAPABILITY_IAM \
   --role-arn arn:aws:iam::$ACCOUNT_ID:role/home-cloud-deployer-role
 ```
-Replace `admin@example.com` with your actual admin email.
+Replace `admin@example.com` with your actual admin email. Architecture defaults to `x86_64` but you **must** set this to arm if you are building on an arm machine.
 
 ---
 
@@ -327,6 +339,7 @@ in any Lambda environment variable or CloudFormation parameter. At cold start:
 | `ToAdminEmail` | SES recipient email (optional, defaults to From) |
 | `ApproveApiBaseUrl` | URL of the WebDAV registration API on your tailnet (e.g. `http://my-server:3000`) |
 | `ApproveApiUsername` | Basic auth username for the API |
+| `Architecture` | Lambda architecture: `arm64` or `x86_64` (default `x86_64`) |
 
 **SSM Parameter Store parameters (created by setup script before deploy):**
 
