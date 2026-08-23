@@ -23,6 +23,13 @@ Parameters:
   ApproveApiUsername:
     Type: String
     Description: Username for Basic auth on the registration API.
+  Architecture:
+    Type: String
+    Default: x86_64
+    AllowedValues:
+      - arm64
+      - x86_64
+    Description: Must match your CPU architecture. x86_64 for Intel/AMD machines. arm64 for ARM-based machines (e.g. Raspberry Pi, Apple M1/M2).
 
 Conditions:
   HasToEmail: !Not [!Equals [!Ref ToAdminEmail, ""]]
@@ -169,7 +176,7 @@ Resources:
       FunctionName: !Sub "${AWS::StackName}-create-user-lambda"
       PackageType: Image
       Architectures:
-        - arm64 # Use - x86_64 if building on an x86 machine
+        - !Ref Architecture
       Code:
         ImageUri: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/home-cloud-ecr-repo:latest"
       Role: !GetAtt CreateUserLambdaExecutionRole.Arn

@@ -228,10 +228,11 @@ aws cloudformation deploy \
     ToAdminEmail=admin2@test.com \
     ApproveApiBaseUrl=http://your-server:3000 \
     ApproveApiUsername=admin \
+    Architecture=x86_64 \
   --capabilities CAPABILITY_IAM \
   --role-arn arn:aws:iam::$ACCOUNT_ID:role/home-cloud-deployer-role
 ```
-Replace `admin@example.com` with your actual admin email.
+Replace `admin@example.com` with your actual admin email. Architecture defaults to `x86_64` but you **must** set this to arm if you are building on an arm machine.
 
 ## Set secrets in Secrets Manager
 
@@ -311,6 +312,7 @@ in any Lambda environment variable or CloudFormation parameter. At cold start:
 | `ToAdminEmail` | SES recipient email (optional, defaults to From) |
 | `ApproveApiBaseUrl` | URL of the WebDAV registration API on your tailnet (e.g. `http://my-server:3000`) |
 | `ApproveApiUsername` | Basic auth username for the API |
+| `Architecture` | Lambda architecture: `arm64` or `x86_64` (default `x86_64`) |
 
 **Secrets Manager secrets (set after deploy):**
 
