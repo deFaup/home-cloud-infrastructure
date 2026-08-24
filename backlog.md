@@ -1,8 +1,6 @@
 # backlog
 
 - SFTP to send email to the requester
-- make a container image lighter. either switch back to alpine and add missing libs, or maybe just one single stage
-
 - passwords shouldn't be stored in the server.
   - i don't think it's needed at all
   - stored in plaintext in the server  `cat /var/www/webdav/.users`

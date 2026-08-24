@@ -1,7 +1,7 @@
 # Define custom function directory
 ARG FUNCTION_DIR="/function"
 
-FROM python:3.13-slim AS build
+FROM python:3.13.14-alpine AS build
 
 # Include global arg in this stage of the build
 ARG FUNCTION_DIR
@@ -9,25 +9,18 @@ ARG FUNCTION_DIR
 RUN mkdir -p ${FUNCTION_DIR}
 COPY . ${FUNCTION_DIR}/
 WORKDIR ${FUNCTION_DIR}
-RUN rm Dockerfile
-RUN pip install uv
-RUN uv pip install --target ${FUNCTION_DIR} -r requirements.txt
 
-
-# Runtime image — must match the build stage's libc (glibc, not musl/Alpine)
-# so that compiled C extensions (awslambdaric's runtime_client) load correctly.
-FROM python:3.13-slim
-
-# Include global arg in this stage of the build
-ARG FUNCTION_DIR
-WORKDIR ${FUNCTION_DIR}
-
-# Copy in the built dependencies
-COPY --from=build ${FUNCTION_DIR} ${FUNCTION_DIR}
+# Use 'uv' python package manager to install dependencies
+RUN rm -f Dockerfile && \
+    wget -qO- https://astral.sh/uv/install.sh | sh && \
+    $HOME/.local/bin/uv pip install --target ${FUNCTION_DIR} -r requirements.txt && \
+    rm -rf $HOME/.local
 
 # Copy Tailscale binaries from the official image.
-COPY --from=docker.io/tailscale/tailscale:stable /usr/local/bin/tailscaled ${FUNCTION_DIR}/tailscaled
-COPY --from=docker.io/tailscale/tailscale:stable /usr/local/bin/tailscale ${FUNCTION_DIR}/tailscale
+COPY --from=docker.io/tailscale/tailscale:stable \
+    /usr/local/bin/tailscaled \
+    /usr/local/bin/tailscale \
+    ${FUNCTION_DIR}/
 
 # Create symlinks so Tailscale can write state to /tmp (writable in Lambda).
 RUN mkdir -p /tmp/tailscale && \
