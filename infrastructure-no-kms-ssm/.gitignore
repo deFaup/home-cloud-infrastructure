@@ -6,4 +6,4 @@
 # *.so
 # *.dist-info/
 # cffi-gen-src
-lambda-registration/packages/
+lambda_signup/packages/

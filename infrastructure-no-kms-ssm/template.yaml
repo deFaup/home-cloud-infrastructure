@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   Home Cloud Stack. Creates a lambda function that will serve as signup page (via a public lambda function URL).
   Signup requires username and email address.
-  The page send the registration request by email (via SES) to the admin.
+  The page send the signup request by email (via SES) to the admin.
   Included in that email are two links to an approve/deny lambda function.
   Request to this lambda are authenticated using Fernet-encrypted user email address (present in the email to the admin).
   The approve function creates the user account via a json API endpoint accessible over Tailscale.
@@ -14,7 +14,7 @@ Parameters:
     Description: Email address used as the sender (SES From). Must be a verified SES identity.
   ToAdminEmail:
     Type: String
-    Description: Email address that receives registration notifications (SES To). Defaults to FromAdminEmail if left empty.
+    Description: Email address that receives signup notifications (SES To). Defaults to FromAdminEmail if left empty.
     Default: ""
   ApproveApiBaseUrl:
     Type: String
@@ -23,7 +23,7 @@ Parameters:
       (e.g. http://my-server:3000 or http://100.x.y.z:3000).
   ApproveApiUsername:
     Type: String
-    Description: Username for Basic auth on the registration API.
+    Description: Username for Basic auth on the signup API.
   Architecture:
     Type: String
     Default: x86_64
@@ -36,22 +36,22 @@ Conditions:
   HasToEmail: !Not [!Equals [!Ref ToAdminEmail, ""]]
 
 Resources:
-  # ── Registration Lambda function ────────────────────────────────────────────────────────
-  RegistrationFunction:
+  # ── Signup Lambda function ────────────────────────────────────────────────────────
+  SignupFunction:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: !Sub "${AWS::StackName}-registration-lambda"
+      FunctionName: !Sub "${AWS::StackName}-signup-lambda"
       Runtime: python3.12
       Architectures:
         - !Ref Architecture
-      Handler: lambda-registration.register.main # <dotted path>.<filename>.<handler_function>
-      # Handler: register.main # uncomment if you decide to zip the register directory instead of using cfn package
-      Role: !GetAtt RegisterLambdaExecutionRole.Arn
+      Handler: lambda_signup.signup.main # <dotted path>.<filename>.<handler_function>
+      # Handler: signup.main # uncomment if you decide to zip the signup directory instead of using cfn package
+      Role: !GetAtt SignupLambdaExecutionRole.Arn
       Timeout: 90
       MemorySize: 128
       # Code: # uncomment if using 'aws cfn package' command
       #   S3Bucket: home-cloud-bucket
-      #   S3Key: registration.zip
+      #   S3Key: signup.zip
       PackageType: Zip
       Environment:
         Variables:
@@ -60,31 +60,31 @@ Resources:
           FERNET_KEY_PARAM: !Sub "/${AWS::StackName}/fernet-key"
           APPROVE_FUNCTION_NAME: !Ref CreateUserFunction
 
-  # ── Registration Lambda function URL — public HTTPS endpoint  ──────────────────────────────────
-  RegistrationFunctionUrl:
+  # ── Signup Lambda function URL — public HTTPS endpoint  ──────────────────────────────────
+  SignupFunctionUrl:
     Type: AWS::Lambda::Url
     Properties:
-      TargetFunctionArn: !Ref RegistrationFunction
+      TargetFunctionArn: !Ref SignupFunction
       AuthType: NONE
 
-  RegistrationFunctionUrlAllowPublicAccess:
+  SignupFunctionUrlAllowPublicAccess:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunctionUrl
-      FunctionName: !Ref RegistrationFunction
+      FunctionName: !Ref SignupFunction
       FunctionUrlAuthType: NONE
       Principal: "*"
 
-  RegistrationFunctionUrlAllowInvokeAction:
+  SignupFunctionUrlAllowInvokeAction:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
-      FunctionName: !Ref RegistrationFunction
+      FunctionName: !Ref SignupFunction
       InvokedViaFunctionUrl: true
       Principal: "*"
 
-  # ── IAM roles and policies for the register function ───────────────────────
-  RegisterLambdaExecutionRole:
+  # ── IAM roles and policies for the signup function ───────────────────────
+  SignupLambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -97,10 +97,10 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
-  RegisterLambdaSesPolicy:
+  SignupLambdaSesPolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: !Sub "${AWS::StackName}-register-ses-policy"
+      PolicyName: !Sub "${AWS::StackName}-signup-ses-policy"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -108,12 +108,12 @@ Resources:
             Action: ses:SendEmail
             Resource: "*"
       Roles:
-        - !Ref RegisterLambdaExecutionRole
+        - !Ref SignupLambdaExecutionRole
 
-  RegisterLambdaInvokeApprovePolicy:
+  SignupLambdaInvokeApprovePolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: !Sub "${AWS::StackName}-register-invoke-lambda-policy"
+      PolicyName: !Sub "${AWS::StackName}-signup-invoke-lambda-policy"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -121,12 +121,12 @@ Resources:
             Action: lambda:InvokeFunction
             Resource: !GetAtt CreateUserFunction.Arn
       Roles:
-        - !Ref RegisterLambdaExecutionRole
+        - !Ref SignupLambdaExecutionRole
 
-  RegisterLambdaSsmPolicy:
+  SignupLambdaSsmPolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: !Sub "${AWS::StackName}-register-ssm-policy"
+      PolicyName: !Sub "${AWS::StackName}-signup-ssm-policy"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -143,7 +143,7 @@ Resources:
               StringEquals:
                 kms:ViaService: !Sub "ssm.${AWS::Region}.amazonaws.com"
       Roles:
-        - !Ref RegisterLambdaExecutionRole
+        - !Ref SignupLambdaExecutionRole
 
   # ── SES identities (must be verified in sandbox mode) ─────────────────────
   FromAdminEmailIdentity:
@@ -236,6 +236,6 @@ Resources:
         - !Ref CreateUserLambdaExecutionRole
 
 Outputs:
-  RegistrationUrl:
-    Description: Public URL of the registration page — share this with users.
-    Value: !GetAtt RegistrationFunctionUrl.FunctionUrl
+  SignupUrl:
+    Description: Public URL of the signup page — share this with users.
+    Value: !GetAtt SignupFunctionUrl.FunctionUrl

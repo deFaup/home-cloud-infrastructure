@@ -2,7 +2,7 @@
 ## Architecture
 
 ```
-User browser  ──GET /──►  Registration Lambda (public URL)
+User browser  ──GET /──►  Signup Lambda (public URL)
                POST /        │
                              ▼
                     Lambda (Python 3.14)
@@ -11,7 +11,7 @@ User browser  ──GET /──►  Registration Lambda (public URL)
                   Serve HTML    SES → admin email
                   (from file)   (with KMS-encrypted approve/deny links)
 
-Admin clicks  ──────────►  Registration Lambda (/approve or /deny)
+Admin clicks  ──────────►  Signup Lambda (/approve or /deny)
   approve link                  │
                                 ▼
                           lambda.invoke()
@@ -27,18 +27,18 @@ Admin clicks  ──────────►  Registration Lambda (/approve o
 ```
 
 **Resources created:**
-- Registration Lambda function (Python 3.14, reads `register.html` from disk)
+- Signup Lambda function (Python 3.14, reads `signup.html` from disk)
 - Approve Lambda function (container image with Tailscale, Python 3.14-slim)
 - ECR repository for the approve Lambda container image
-- Lambda Function URL for registration Lambda (public HTTPS endpoint, no API Gateway)
+- Lambda Function URL for signup Lambda (public HTTPS endpoint, no API Gateway)
 - KMS key (encrypts usernames in approve/deny tokens)
 - IAM roles + policies (SES, KMS decrypt, ECR pull, Secrets Manager read, Lambda invoke)
 - SES email identities (admin email, must be verified)
 
 **Files:**
 - `template.yaml` — CloudFormation stack definition
-- `lambda/register.py` — Registration Lambda handler
-- `lambda/register.html` — registration page (edit this to change the UI)
+- `lambda/signup.py` — Signup Lambda handler
+- `lambda/signup.html` — signup page (edit this to change the UI)
 - `lambda-approve/Dockerfile` — Approve Lambda container image
 - `lambda-approve/bootstrap` — Tailscale startup script
 - `lambda-approve/fetch_authkey.py` — Secrets Manager auth key fetcher (runs at cold start)
@@ -162,11 +162,11 @@ aws iam attach-role-policy \
 
 ### II. Create the S3 bucket
 Create an S3 bucket for your deployment.
-> `YOUR_DEPLOY_BUCKET=home-cloud-bucket`
-> `aws s3 mb s3://$YOUR_DEPLOY_BUCKET --profile admin`
+> `HOME_CLOUD_DEPLOY_BUCKET=home-cloud-bucket`
+> `aws s3 mb s3://$HOME_CLOUD_DEPLOY_BUCKET --profile admin`
 
-You can always delete it later without breaking the registration page. If you decide to make an update you can simply re-create it.
-> `aws s3 rb s3://$YOUR_DEPLOY_BUCKET --profile admin`
+You can always delete it later without breaking the signup page. If you decide to make an update you can simply re-create it.
+> `aws s3 rb s3://$HOME_CLOUD_DEPLOY_BUCKET --profile admin`
 
 ---
 
@@ -208,10 +208,10 @@ Make sure to remove the older image as well.
 This uploads the Lambda code and HTML page to S3. It creates a new yaml template which includes a reference to the files in S3 (search for "S3Key" in file 'infrastructure/packaged.yaml')
 
 ```bash
-YOUR_DEPLOY_BUCKET=home-cloud-bucket
+HOME_CLOUD_DEPLOY_BUCKET=home-cloud-bucket
 aws cloudformation package \
   --template-file infrastructure/template.yaml \
-  --s3-bucket $YOUR_DEPLOY_BUCKET \
+  --s3-bucket $HOME_CLOUD_DEPLOY_BUCKET \
   --output-template-file infrastructure/packaged.yaml \
   --profile admin
 ```
@@ -268,7 +268,7 @@ This removes all resources created by the stack (Lambda, Function URL, KMS key, 
 
 > aws ecr delete-repository --profile admin --repository-name home-cloud-ecr-repo --force
 
-> aws s3 rb s3://$YOUR_DEPLOY_BUCKET --profile admin --force
+> aws s3 rb s3://$HOME_CLOUD_DEPLOY_BUCKET --profile admin --force
 
 Finally remove the deployer role and policy (delete all versions if more than one present).
 ```bash
@@ -287,7 +287,7 @@ aws iam delete-role --profile admin --role-name home-cloud-deployer-role
 # Infra explained
 ## How approve/deny tokens work
 
-When a user registers, the Lambda encrypts their username with the KMS key created by the stack. The encrypted username becomes the `token` parameter in the approve/deny links. On click, the approve Lambda decrypts the token with KMS to recover the username, generates a random password, and calls the registration API over Tailscale.
+When a user signs up, the Lambda encrypts their username with the KMS key created by the stack. The encrypted username becomes the `token` parameter in the approve/deny links. On click, the approve Lambda decrypts the token with KMS to recover the username, generates a random password, and calls the signup API over Tailscale.
 
 - Only someone with KMS access can forge a valid token
 - No secret needs to be stored or passed as a parameter
@@ -310,7 +310,7 @@ in any Lambda environment variable or CloudFormation parameter. At cold start:
 |-----------|-------------|
 | `FromAdminEmail` | SES sender email (must be verified) |
 | `ToAdminEmail` | SES recipient email (optional, defaults to From) |
-| `ApproveApiBaseUrl` | URL of the WebDAV registration API on your tailnet (e.g. `http://my-server:3000`) |
+| `ApproveApiBaseUrl` | URL of the WebDAV signup API on your tailnet (e.g. `http://my-server:3000`) |
 | `ApproveApiUsername` | Basic auth username for the API |
 | `Architecture` | Lambda architecture: `arm64` or `x86_64` (default `x86_64`) |
 
@@ -319,26 +319,26 @@ in any Lambda environment variable or CloudFormation parameter. At cold start:
 | Secret name | Description |
 |-------------|-------------|
 | `<stack-name>/tailscale-auth-key` | Tailscale ephemeral auth key (`tskey-auth-...`) |
-| `<stack-name>/admin-api-password` | Basic auth password for the registration API |
+| `<stack-name>/admin-api-password` | Basic auth password for the signup API |
 
 ---
 
-## Get the registration URL
+## Get the signup URL
 
 ```bash
 aws cloudformation describe-stacks \
   --stack-name home-cloud \
-  --query 'Stacks[0].Outputs[?OutputKey==`RegistrationUrl`].OutputValue' \
+  --query 'Stacks[0].Outputs[?OutputKey==`SignupUrl`].OutputValue' \
   --output text
 ```
 
-Share this URL with users. Visiting it shows the registration form.
+Share this URL with users. Visiting it shows the signup form.
 
 ---
 
-## Editing the registration page
+## Editing the signup page
 
-Edit `infrastructure/lambda/register.html`, then re-run the package + deploy commands. The HTML is read from disk at Lambda cold start, so changes take effect on the next deployment.
+Edit `infrastructure/lambda/signup.html`, then re-run the package + deploy commands. The HTML is read from disk at Lambda cold start, so changes take effect on the next deployment.
 
 ---
 
