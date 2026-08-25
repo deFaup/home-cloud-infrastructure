@@ -44,13 +44,14 @@ Resources:
       Runtime: python3.12
       Architectures:
         - !Ref Architecture
-      Handler: register.main # <dotted path>.<filename>.<handler_function>
+      Handler: lambda-registration.register.main # <dotted path>.<filename>.<handler_function>
+      # Handler: register.main # uncomment if you decide to zip the register directory instead of using cfn package
       Role: !GetAtt RegisterLambdaExecutionRole.Arn
       Timeout: 90
       MemorySize: 128
-      Code:
-        S3Bucket: home-cloud-bucket
-        S3Key: registration.zip
+      # Code: # uncomment if using 'aws cfn package' command
+      #   S3Bucket: home-cloud-bucket
+      #   S3Key: registration.zip
       PackageType: Zip
       Environment:
         Variables:
