@@ -36,8 +36,6 @@ HOME_CLOUD_DEPLOY_BUCKET=home-cloud-bucket
 aws s3 mb s3://$HOME_CLOUD_DEPLOY_BUCKET --profile admin
 echo "Created S3 bucket: $HOME_CLOUD_DEPLOY_BUCKET"
 
-./infrastructure-no-kms-ssm/setup-parameters.sh --profile admin
-
 # Create an ECR (elastic container) repository
 ECR_URI=$(aws ecr create-repository \
   --profile admin \
@@ -61,6 +59,4 @@ docker buildx build --provenance=false \
 echo "Pushing Docker image to ECR..."
 docker push ${ECR_URI}:latest
 
-# Install python dependency required for the Register lambda function 
-mkdir -p infrastructure-no-kms-ssm/lambda-registration/packages
-pip install "cryptography" --target infrastructure-no-kms-ssm/lambda-registration/packages/ --quiet
+./infrastructure-no-kms-ssm/setup-parameters.sh --profile admin

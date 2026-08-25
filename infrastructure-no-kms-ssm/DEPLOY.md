@@ -52,7 +52,9 @@ ACCOUNT_ID=$(aws sts get-caller-identity --profile admin --query Account --outpu
 
 # First-time deployment commands (RUN ONCE)
 Login to AWS through the CLI if not done already
-> aws login --profile admin
+```bash
+aws login --profile admin
+```
 
 Next we need to create a few resources manually.
 - a deployer policy and role
@@ -61,7 +63,9 @@ Next we need to create a few resources manually.
 - save to SSM Parameter Store the Tailscale auth key, the admin API key and an encryption key
 
 Simply run the script below to take care of all this. I strongly recommend reading the explanation beneath.
-> ./infrastructure-no-kms-ssm/first-deploy.sh
+```bash
+./infrastructure-no-kms-ssm/first-deploy.sh
+```
 
 **Section I/II/III/IV below are already taken care by the script above.**
 
@@ -186,29 +190,33 @@ Make sure to remove the older image as well.
 
 ---
 
-# Package
-The "Register" Lambda function’s code comprises of the main 'register.py' file containing the function’s handler code, as well as additional packages and modules the code depends on AND the static HTML page. Because of these we must first create a deployment package in order to deploy this function code to Lambda. We create the package as a `.zip` file. 
-When creating the lambda we have the choice of:
-- using the CLI and attaching the zip in the create command OR
-- use cloudformation in which case the zip file must be uploaded to S3 first
+# Package the Register lambda code
+The "Register" Lambda function’s code comprises of the main 'register.py' file containing the function’s handler code, python dependencies and the static HTML page. Cloudformation (cfn) cannot ship this all-at-once, we must first create a zip package, upload it and refenrence it in the cfn template.
+_Note: when using the CLI only it is possible to pass the zip directly. _
 
-Alternatively you can use the cloudformation package command which zips the whole directory where the template lives, uploads that to S3 and finally creates a new template where the lambda now has Code.S3Bucket and Code.S3Key fields pointing to the uploaded zip file."
+The cloudformation package command zips the whole directory where the template lives, uploads that to S3 and finally creates a new template where the Register lambda config now includes Code.S3Bucket and Code.S3Key pointing to the uploaded zip file."
 
-Install cryptography library then package all files and upload it to S3 with name `registration.zip`.
 ```bash
+# Install python dependency required for the Register lambda function
 mkdir -p infrastructure-no-kms-ssm/lambda-registration/packages
 pip install "cryptography" --target infrastructure-no-kms-ssm/lambda-registration/packages/ --quiet
-cd infrastructure-no-kms-ssm/lambda-registration/ && zip -r ../registration.zip . && cd -
-aws s3 cp infrastructure-no-kms-ssm/registration.zip s3://${HOME_CLOUD_DEPLOY_BUCKET} --profile admin
-rm infrastructure-no-kms-ssm/registration.zip
-# HOME_CLOUD_DEPLOY_BUCKET=home-cloud-bucket
-# aws cloudformation package \
-#   --template-file infrastructure-no-kms-ssm/template.yaml \
-#   --s3-bucket $HOME_CLOUD_DEPLOY_BUCKET \
-#   --output-template-file infrastructure-no-kms-ssm/packaged.yaml \
-#   --profile admin
+HOME_CLOUD_DEPLOY_BUCKET=home-cloud-bucket
+aws cloudformation package \
+  --template-file infrastructure-no-kms-ssm/template.yaml \
+  --s3-bucket $HOME_CLOUD_DEPLOY_BUCKET \
+  --output-template-file infrastructure-no-kms-ssm/packaged.yaml \
+  --profile admin
+rm -rf infrastructure-no-kms-ssm/lambda-registration/packages
 ```
-
+Alternatively you can zip the registration lambda folder only, upload it and then update the lambda code. It requires having the template pointing to the static zip file in S3 and update the handler path.
+```
+# mkdir -p infrastructure-no-kms-ssm/lambda-registration/packages
+# pip install "cryptography" --target infrastructure-no-kms-ssm/lambda-registration/packages/ --quiet
+# cd infrastructure-no-kms-ssm/lambda-registration/ && zip -r ../registration.zip . && cd -
+# aws s3 cp infrastructure-no-kms-ssm/registration.zip s3://${HOME_CLOUD_DEPLOY_BUCKET} --profile admin
+# rm infrastructure-no-kms-ssm/registration.zip
+# aws lambda update-function-code --profile admin --function-name home-cloud-registration-lambda --s3-bucket home-cloud-bucket --s3-key registration.zip
+```
 ---
 
 # Deploy
@@ -233,6 +241,8 @@ Replace `admin@example.com` with your actual admin email. Architecture defaults 
 
 # Delete the stack
 Simply run the script below to take care of all this.
-> ./infrastructure-no-kms-ssm/delete-all-aws-resources.sh
+```bash
+./infrastructure-no-kms-ssm/delete-all-aws-resources.sh
+```
 
 ---
