@@ -2,7 +2,7 @@
 ## Architecture
 
 ```
-User browser  ──GET /──►  Registration Lambda (public URL)
+User browser  ──GET /──►  Signup Lambda (public URL)
                POST /        │
                              ▼
                     Lambda (Python 3.14)
@@ -11,7 +11,7 @@ User browser  ──GET /──►  Registration Lambda (public URL)
                   Serve HTML    SES → admin email
                   (from file)   (with Fernet-encrypted approve/deny links)
 
-Admin clicks  ──────────►  Registration Lambda (/approve or /deny)
+Admin clicks  ──────────►  Signup Lambda (/approve or /deny)
   approve link                  │
                                 ▼
                           lambda.invoke()
@@ -23,14 +23,14 @@ Admin clicks  ──────────►  Registration Lambda (/approve o
                            Fernet decrypt (key from SSM)
                            Generate password
                            POST via Tailscale SOCKS5 proxy
-                             → Registration API
+                             → Signup API
 ```
 
 **Resources created:**
-- Registration Lambda function (Python 3.14, reads `register.html` from disk)
+- Signup Lambda function (Python 3.14, reads `signup.html` from disk)
 - Approve Lambda function (container image with Tailscale, Python 3.14-slim)
 - ECR repository for the approve Lambda container image
-- Lambda Function URL for registration Lambda (public HTTPS endpoint, no API Gateway)
+- Lambda Function URL for the Signup Lambda (public HTTPS endpoint, no API Gateway)
 - IAM roles + policies (SES, SSM Parameter Store read, ECR pull, Lambda invoke)
 - SES email identities (admin email, must be verified)
 
@@ -41,8 +41,8 @@ Admin clicks  ──────────►  Registration Lambda (/approve o
 - `template.yaml` — CloudFormation stack definition
 - `setup-parameters.sh` — Creates SSM SecureString parameters (run before deploying)
 - `deployer-policy.json` — IAM policy for the CloudFormation deployer role
-- `lambda/register.py` — Registration Lambda handler
-- `lambda/register.html` — registration page (edit this to change the UI)
+- `lambda/signup.py` — Signup Lambda handler
+- `lambda/signup.html` — Signup page (edit this to change the UI)
 - `lambda-approve/Dockerfile` — Approve Lambda container image
 - `lambda-approve/bootstrap` — Tailscale startup script
 - `lambda-approve/fetch_authkey.py` — SSM Parameter Store auth key fetcher (runs at cold start)
@@ -71,7 +71,7 @@ Admin clicks  ──────────►  Registration Lambda (/approve o
 # Infra explained
 ## How approve/deny tokens work
 
-When a user registers, the Lambda encrypts the user's email and username with Fernet symmetric encryption. The Fernet key is stored in SSM Parameter Store SecureString and fetched at Lambda cold start. The encrypted payload becomes the `token` parameter in the approve/deny links. On click, the approve Lambda decrypts the token with Fernet to recover the payload, generates a random password, and calls the registration API over Tailscale.
+When a user signs up, the Lambda encrypts the user's email and username with Fernet symmetric encryption. The Fernet key is stored in SSM Parameter Store SecureString and fetched at Lambda cold start. The encrypted payload becomes the `token` parameter in the approve/deny links. On click, the approve Lambda decrypts the token with Fernet to recover the payload, generates a random password, and calls the signup API over Tailscale.
 
 - Only someone with the Fernet key can forge a valid token
 - The key is stored in SSM SecureString (encrypted at rest with AWS-managed key)
@@ -95,7 +95,7 @@ in any Lambda environment variable or CloudFormation parameter. At cold start:
 |-----------|-------------|
 | `FromAdminEmail` | SES sender email (must be verified) |
 | `ToAdminEmail` | SES recipient email (optional, defaults to From) |
-| `ApproveApiBaseUrl` | URL of the WebDAV registration API on your tailnet (e.g. `http://my-server:3000`) |
+| `ApproveApiBaseUrl` | URL of the WebDAV signup API on your tailnet (e.g. `http://my-server:3000`) |
 | `ApproveApiUsername` | Basic auth username for the API |
 | `Architecture` | Lambda architecture: `arm64` or `x86_64` (default `x86_64`) |
 
@@ -105,26 +105,26 @@ in any Lambda environment variable or CloudFormation parameter. At cold start:
 |-----------|-------------|
 | `/home-cloud/fernet-key` | Fernet encryption key for tokens |
 | `/home-cloud/tailscale-auth-key` | Tailscale ephemeral auth key (`tskey-auth-...`) |
-| `/home-cloud/admin-api-password` | Basic auth password for the registration API |
+| `/home-cloud/admin-api-password` | Basic auth password for the signup API |
 
 ---
 
-## Get the registration URL
+## Get the signup URL
 
 ```bash
 aws cloudformation describe-stacks \
   --stack-name home-cloud \
-  --query 'Stacks[0].Outputs[?OutputKey==`RegistrationUrl`].OutputValue' \
+  --query 'Stacks[0].Outputs[?OutputKey==`SignupUrl`].OutputValue' \
   --output text
 ```
 
-Share this URL with users. Visiting it shows the registration form.
+Share this URL with users. Visiting it shows the signup form.
 
 ---
 
-## Editing the registration page
+## Editing the signup page
 
-Edit `infrastructure-no-kms-ssm/lambda/register.html`, then re-run the package + deploy commands. The HTML is read from disk at Lambda cold start, so changes take effect on the next deployment.
+Edit `infrastructure-no-kms-ssm/lambda/signup.html`, then re-run the package + deploy commands. The HTML is read from disk at Lambda cold start, so changes take effect on the next deployment.
 
 ---
 
@@ -171,7 +171,7 @@ aws ssm put-parameter \
 # Force Lambda to pick up the new key (cold start)
 aws lambda update-function-configuration \
   --profile admin \
-  --function-name home-cloud-registration-lambda \
+  --function-name home-cloud-signup-lambda \
   --environment Variables="{FERNET_KEY_PARAM=/home-cloud/fernet-key}" \
   --no-cli-pager
 ```

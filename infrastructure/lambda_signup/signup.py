@@ -5,35 +5,19 @@ import urllib.parse
 from pathlib import Path
 
 import boto3
-import sys
-sys.path.insert(0, './packages')
-
-from cryptography.fernet import Fernet
 from botocore.exceptions import ClientError
-from cryptography.fernet import Fernet
 
 ses = boto3.client("ses")
-ssm = boto3.client("ssm")
+kms = boto3.client("kms")
 lmbd = boto3.client("lambda")
 
 FROM_ADMIN_EMAIL = os.environ["FROM_ADMIN_EMAIL"]
 TO_ADMIN_EMAIL = os.environ.get("TO_ADMIN_EMAIL", "") or FROM_ADMIN_EMAIL
-FERNET_KEY_PARAM = os.environ["FERNET_KEY_PARAM"]
+KMS_KEY_ID = os.environ["KMS_KEY_ID"]
 APPROVE_FUNCTION_NAME = os.environ.get("APPROVE_FUNCTION_NAME", "")
 
-# Fetch Fernet key from SSM Parameter Store at cold start
-_fernet = None
-
-def _get_fernet():
-    global _fernet
-    if _fernet is None:
-        resp = ssm.get_parameter(Name=FERNET_KEY_PARAM, WithDecryption=True)
-        key = resp["Parameter"]["Value"].encode()
-        _fernet = Fernet(key)
-    return _fernet
-
 # Read the HTML once at cold start
-REGISTRATION_HTML = (Path(__file__).parent / "register.html").read_text()
+REGISTRATION_HTML = (Path(__file__).parent / "signup.html").read_text()
 
 
 def main(event, context):
@@ -179,27 +163,27 @@ def invoke_approve_function(token):
         print(f"Lambda invoke error: {exc}")
         return html_response(500, "<h1>Failed to process request</h1>")
 
-# ── Fernet helpers ───────────────────────────────────────────────────────────
+# ── KMS helpers ──────────────────────────────────────────────────────────────
 
 def encrypt_token(payload):
-    """Encrypt a dict payload with Fernet, return URL-safe token."""
+    """Encrypt a dict payload with KMS, return URL-safe token."""
     try:
         plaintext = json.dumps(payload).encode()
-        f = _get_fernet()
-        return f.encrypt(plaintext).rstrip(b"=").decode()
+        resp = kms.encrypt(KeyId=KMS_KEY_ID, Plaintext=plaintext)
+        return base64.urlsafe_b64encode(resp["CiphertextBlob"]).rstrip(b"=").decode()
     except Exception as exc:
-        print(f"Fernet encrypt error: {exc}")
+        print(f"KMS encrypt error: {exc}")
         return None
 
 def decrypt_token(token):
     """Decrypt URL-safe token back to dict. Returns None if invalid."""
     try:
         padded = token + "=" * (-len(token) % 4)
-        f = _get_fernet()
-        plaintext = f.decrypt(padded.encode())
-        return json.loads(plaintext.decode())
+        ciphertext = base64.urlsafe_b64decode(padded)
+        resp = kms.decrypt(CiphertextBlob=ciphertext)
+        return json.loads(resp["Plaintext"].decode())
     except Exception as exc:
-        print(f"Fernet decrypt error: {exc}")
+        print(f"KMS decrypt error: {exc}")
         return None
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

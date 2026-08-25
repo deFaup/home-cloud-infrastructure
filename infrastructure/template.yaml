@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   Home Cloud Stack. Creates a lambda function that will serve as signup page (via a public lambda function URL).
   Signup requires username and email address.
-  The page send the registration request by email (via SES) to the admin.
+  The page send the signup request by email (via SES) to the admin.
   Included in that email are two links to an approve/deny lambda function.
   Request to this lambda are authenticated using the KMS-encrypted user email address (present in the email to the admin).
   The approve function creates the user account via a json API endpoint accessible over Tailscale.
@@ -13,7 +13,7 @@ Parameters:
     Description: Email address used as the sender (SES From). Must be a verified SES identity.
   ToAdminEmail:
     Type: String
-    Description: Email address that receives registration notifications (SES To). Defaults to FromAdminEmail if left empty.
+    Description: Email address that receives signup notifications (SES To). Defaults to FromAdminEmail if left empty.
     Default: ""
   ApproveApiBaseUrl:
     Type: String
@@ -22,7 +22,7 @@ Parameters:
       (e.g. http://my-server:3000 or http://100.x.y.z:3000).
   ApproveApiUsername:
     Type: String
-    Description: Username for Basic auth on the registration API.
+    Description: Username for Basic auth on the signup API.
   Architecture:
     Type: String
     Default: x86_64
@@ -35,51 +35,51 @@ Conditions:
   HasToEmail: !Not [!Equals [!Ref ToAdminEmail, ""]]
 
 Resources:
-  # ── Registration Lambda function ────────────────────────────────────────────────────────
-  RegistrationFunction:
+  # ── Signup Lambda function ────────────────────────────────────────────────────────
+  SignupFunction:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: !Sub "${AWS::StackName}-registration-lambda"
+      FunctionName: !Sub "${AWS::StackName}-signup-lambda"
       Runtime: python3.14
-      Handler: lambda.register.main # <dotted path>.<filename>.<handler_function>
-      Role: !GetAtt RegisterLambdaExecutionRole.Arn
+      Handler: lambda_signup.signup.main # <dotted path>.<filename>.<handler_function>
+      Role: !GetAtt SignupLambdaExecutionRole.Arn
       Timeout: 90
       MemorySize: 128
       Environment:
         Variables:
           FROM_ADMIN_EMAIL: !Ref FromAdminEmail
           TO_ADMIN_EMAIL: !If [HasToEmail, !Ref ToAdminEmail, ""]
-          KMS_KEY_ID: !Ref RegistrationEncryptionKey
+          KMS_KEY_ID: !Ref HomeCloudEncryptionKey
           APPROVE_FUNCTION_NAME: !Ref CreateUserFunction
 
-  # ── Registration Lambda function URL — public HTTPS endpoint  ──────────────────────────────────
-  RegistrationFunctionUrl:
+  # ── Signup Lambda function URL — public HTTPS endpoint  ──────────────────────────────────
+  SignupFunctionUrl:
     Type: AWS::Lambda::Url
     Properties:
-      TargetFunctionArn: !Ref RegistrationFunction
+      TargetFunctionArn: !Ref SignupFunction
       AuthType: NONE
 
-  RegistrationFunctionUrlAllowPublicAccess:
+  SignupFunctionUrlAllowPublicAccess:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunctionUrl
-      FunctionName: !Ref RegistrationFunction
+      FunctionName: !Ref SignupFunction
       FunctionUrlAuthType: NONE
       Principal: "*"
 
-  RegistrationFunctionUrlAllowInvokeAction:
+  SignupFunctionUrlAllowInvokeAction:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
-      FunctionName: !Ref RegistrationFunction
+      FunctionName: !Ref SignupFunction
       InvokedViaFunctionUrl: true
       Principal: "*"
 
   # ── KMS key for encrypting approve/deny tokens ─────────────────────────────
-  RegistrationEncryptionKey:
+  HomeCloudEncryptionKey:
     Type: AWS::KMS::Key
     Properties:
-      Description: Encrypts email addresses in approve/deny registration links.
+      Description: Encrypts email addresses in approve/deny signup links.
       EnableKeyRotation: true
       KeyPolicy:
         Version: "2012-10-17"
@@ -90,10 +90,10 @@ Resources:
               AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
             Action: "kms:*"
             Resource: "*"
-          - Sid: AllowRegisterLambdaUsage
+          - Sid: AllowSignupLambdaUsage
             Effect: Allow
             Principal:
-              AWS: !GetAtt RegisterLambdaExecutionRole.Arn
+              AWS: !GetAtt SignupLambdaExecutionRole.Arn
             Action:
               - kms:Encrypt
               - kms:Decrypt
@@ -108,14 +108,14 @@ Resources:
               - kms:DescribeKey
             Resource: "*"
 
-  RegistrationEncryptionKeyAlias:
+  HomeCloudEncryptionKeyAlias:
     Type: AWS::KMS::Alias
     Properties:
       AliasName: "alias/home-cloud-encryption-key"
-      TargetKeyId: !Ref RegistrationEncryptionKey
+      TargetKeyId: !Ref HomeCloudEncryptionKey
 
-  # ── IAM roles and policies for the register function ───────────────────────
-  RegisterLambdaExecutionRole:
+  # ── IAM roles and policies for the signup function ───────────────────────
+  SignupLambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -128,10 +128,10 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
-  RegisterLambdaSesPolicy:
+  SignupLambdaSesPolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: !Sub "${AWS::StackName}-register-ses-policy"
+      PolicyName: !Sub "${AWS::StackName}-signup-ses-policy"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -139,12 +139,12 @@ Resources:
             Action: ses:SendEmail
             Resource: "*"
       Roles:
-        - !Ref RegisterLambdaExecutionRole
+        - !Ref SignupLambdaExecutionRole
 
-  RegisterLambdaInvokeApprovePolicy:
+  SignupLambdaInvokeApprovePolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: !Sub "${AWS::StackName}-register-invoke-lambda--policy"
+      PolicyName: !Sub "${AWS::StackName}-signup-invoke-lambda--policy"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -152,7 +152,7 @@ Resources:
             Action: lambda:InvokeFunction
             Resource: !GetAtt CreateUserFunction.Arn
       Roles:
-        - !Ref RegisterLambdaExecutionRole
+        - !Ref SignupLambdaExecutionRole
 
   # ── SES identities (must be verified in sandbox mode) ─────────────────────
   FromAdminEmailIdentity:
@@ -184,7 +184,7 @@ Resources:
       MemorySize: 128
       Environment:
         Variables:
-          KMS_KEY_ID: !Ref RegistrationEncryptionKey
+          KMS_KEY_ID: !Ref HomeCloudEncryptionKey
           API_BASE_URL: !Ref ApproveApiBaseUrl
           API_USERNAME: !Ref ApproveApiUsername
           TAILSCALE_AUTHKEY_ARN: !Ref TailscaleAuthKeySecret
@@ -205,7 +205,7 @@ Resources:
     Properties:
       Name: !Sub "${AWS::StackName}/admin-api-password"
       Description: >
-        Basic auth password for the registration API. Update this value in
+        Basic auth password for the signup API. Update this value in
         the AWS Console or CLI after the stack is deployed. The Lambda function
         fetches it at runtime, not stored as a lambda environment variables.
 
@@ -256,6 +256,6 @@ Resources:
         - !Ref CreateUserLambdaExecutionRole
 
 Outputs:
-  RegistrationUrl:
-    Description: Public URL of the registration page — share this with users.
-    Value: !GetAtt RegistrationFunctionUrl.FunctionUrl
+  SignupUrl:
+    Description: Public URL of the signup page — share this with users.
+    Value: !GetAtt SignupFunctionUrl.FunctionUrl
