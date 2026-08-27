@@ -44,7 +44,7 @@ ALPHANUMERIC = string.ascii_letters + string.digits
 
 
 def main(event, context):
-    """Invoked by the approver Lambda.
+    """Invoked by the Signup Lambda.
     If the encrypted token parameter is valid then a new user is created via the registration API on the tailnet.
     Token decrypts to a JSON dict: {email, user, approved}.
     """

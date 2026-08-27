@@ -26,7 +26,7 @@ done
 # Connect this node to the tailnet using the ephemeral key from SSM.
 ${FUNCTION_DIR}/tailscale up \
   --auth-key=$(cat /tmp/tailscale-authkey) \
-  --hostname=lambda-approve \
+  --hostname=lambda_create_user \
   --accept-routes
 
 # Clean up the key file — it is no longer needed.
@@ -46,10 +46,10 @@ while [ $TRIES -lt 15 ]; do
 done
 
 # NOTE: We intentionally do NOT set ALL_PROXY here. The Python handler
-# (approver.py) routes API calls through the Tailscale SOCKS5 proxy
+# (create_user.py) routes API calls through the Tailscale SOCKS5 proxy
 # explicitly via raw sockets. Setting ALL_PROXY would break:
 #   - awslambdaric (can't reach the Lambda Runtime API on localhost)
-#   - boto3 (KMS/SecretsManager calls would go through the proxy)
+#   - boto3 (SSM calls would go through the proxy)
 
 # Start the Lambda Runtime Interface Client.
-exec /usr/local/bin/python -m awslambdaric approver.main
+exec /usr/local/bin/python -m awslambdaric create_user.main
