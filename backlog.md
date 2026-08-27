@@ -14,6 +14,3 @@
   - one DEPLOY.md for both infra
   - new arch.md with diagrams
 - add a script to populate secrets in KMS stack
-- rename the lambda directories with better names
-   - lambda -> lambda_signup
-  - lambda-approve -> lambda-create-user

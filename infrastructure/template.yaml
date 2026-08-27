@@ -5,7 +5,7 @@ Description: >
   The page send the signup request by email (via SES) to the admin.
   Included in that email are two links to an approve/deny lambda function.
   Request to this lambda are authenticated using the KMS-encrypted user email address (present in the email to the admin).
-  The approve function creates the user account via a json API endpoint accessible over Tailscale.
+  The CreateUser function creates the user account via a json API endpoint accessible over Tailscale.
 
 Parameters:
   FromAdminEmail:
@@ -15,14 +15,14 @@ Parameters:
     Type: String
     Description: Email address that receives signup notifications (SES To). Defaults to FromAdminEmail if left empty.
     Default: ""
-  ApproveApiBaseUrl:
+  UserApiBaseUrl:
     Type: String
     Description: >
       Base URL of the Json API endpoint accessible on your Tailscale network
       (e.g. http://my-server:3000 or http://100.x.y.z:3000).
-  ApproveApiUsername:
+  UserApiUsername:
     Type: String
-    Description: Username for Basic auth on the signup API.
+    Description: Username for Basic auth on the User API.
   Architecture:
     Type: String
     Default: x86_64
@@ -185,8 +185,8 @@ Resources:
       Environment:
         Variables:
           KMS_KEY_ID: !Ref HomeCloudEncryptionKey
-          API_BASE_URL: !Ref ApproveApiBaseUrl
-          API_USERNAME: !Ref ApproveApiUsername
+          API_BASE_URL: !Ref UserApiBaseUrl
+          API_USERNAME: !Ref UserApiUsername
           TAILSCALE_AUTHKEY_ARN: !Ref TailscaleAuthKeySecret
           ADMIN_API_PASSWORD_ARN: !Ref AdminApiPasswordSecret
 
@@ -205,7 +205,7 @@ Resources:
     Properties:
       Name: !Sub "${AWS::StackName}/admin-api-password"
       Description: >
-        Basic auth password for the signup API. Update this value in
+        Basic auth password for the User API. Update this value in
         the AWS Console or CLI after the stack is deployed. The Lambda function
         fetches it at runtime, not stored as a lambda environment variables.
 

@@ -2,7 +2,7 @@
 
 1. **AWS CLI** configured with credentials (see next section)
 2. **Tailscale auth key** — generate a ephemeral auth key at https://login.tailscale.com/admin/settings/keys. Make sure to set it as "reusable". Ephemeral keys have the benefits of removing the lambda node once it goes offline. If device approval is enabled, pre-approve the key.
-3. **Docker** with buildx plugin — required to build the approve Lambda container image.
+3. **Docker** with buildx plugin — required to build the CreateUser Lambda container image.
 4. **Python 3** with `cryptography` package — required by the setup script to generate a Fernet key.
 
 ## AWS CLI configuration
@@ -152,7 +152,7 @@ All three are stored as SSM SecureString parameters, encrypted with the AWS-mana
 |-----------|-------------|
 | `/home-cloud/fernet-key` | Auto-generated Fernet key for token encryption |
 | `/home-cloud/tailscale-auth-key` | Tailscale ephemeral auth key |
-| `/home-cloud/admin-api-password` | Basic auth password for the signup API |
+| `/home-cloud/admin-api-password` | Basic auth password for the User API |
 
 ---
 
@@ -172,8 +172,8 @@ aws ecr get-login-password --profile admin \
 # Build the image (must target linux/amd64 for Lambda)
 docker buildx build --provenance=false \
   -t ${ECR_URI}:latest \
-  -f infrastructure-no-kms-ssm/lambda-approve/Dockerfile \
-  infrastructure-no-kms-ssm/lambda-approve/
+  -f infrastructure-no-kms-ssm/lambda_create_user/Dockerfile \
+  infrastructure-no-kms-ssm/lambda_create_user/
 
 # Push to ECR
 docker push ${ECR_URI}:latest
@@ -229,8 +229,8 @@ aws cloudformation deploy \
   --parameter-overrides \
     FromAdminEmail=admin@test.com \
     ToAdminEmail=admin2@test.com \
-    ApproveApiBaseUrl=http://your-server:3000 \
-    ApproveApiUsername=admin \
+    UserApiBaseUrl=http://your-server:3000 \
+    UserApiUsername=admin \
     Architecture=x86_64 \
   --capabilities CAPABILITY_IAM \
   --role-arn arn:aws:iam::$ACCOUNT_ID:role/home-cloud-deployer-role

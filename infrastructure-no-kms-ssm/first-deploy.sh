@@ -52,8 +52,8 @@ aws ecr get-login-password --profile admin \
 echo "Building Docker image for the CreateUser Lambda function..."
 docker buildx build --provenance=false \
   -t ${ECR_URI}:latest \
-  -f infrastructure-no-kms-ssm/lambda-approve/Dockerfile \
-  infrastructure-no-kms-ssm/lambda-approve/
+  -f infrastructure-no-kms-ssm/lambda_create_user/Dockerfile \
+  infrastructure-no-kms-ssm/lambda_create_user/
 
 # Push to ECR
 echo "Pushing Docker image to ECR..."

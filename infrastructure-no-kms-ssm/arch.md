@@ -17,19 +17,19 @@ Admin clicks  ──────────►  Signup Lambda (/approve or /den
                           lambda.invoke()
                                 │
                                 ▼
-                          Approve Lambda (private, no public URL)
+                          CreateUser Lambda (private, no public URL)
                                 │
                                 ▼
                            Fernet decrypt (key from SSM)
                            Generate password
                            POST via Tailscale SOCKS5 proxy
-                             → Signup API
+                             → User API
 ```
 
 **Resources created:**
 - Signup Lambda function (Python 3.14, reads `signup.html` from disk)
-- Approve Lambda function (container image with Tailscale, Python 3.14-slim)
-- ECR repository for the approve Lambda container image
+- CreateUser Lambda function (container image with Tailscale, Python 3.14-slim)
+- ECR repository for the CreateUser Lambda container image
 - Lambda Function URL for the Signup Lambda (public HTTPS endpoint, no API Gateway)
 - IAM roles + policies (SES, SSM Parameter Store read, ECR pull, Lambda invoke)
 - SES email identities (admin email, must be verified)
@@ -43,10 +43,10 @@ Admin clicks  ──────────►  Signup Lambda (/approve or /den
 - `deployer-policy.json` — IAM policy for the CloudFormation deployer role
 - `lambda/signup.py` — Signup Lambda handler
 - `lambda/signup.html` — Signup page (edit this to change the UI)
-- `lambda-approve/Dockerfile` — Approve Lambda container image
-- `lambda-approve/bootstrap` — Tailscale startup script
-- `lambda-approve/fetch_authkey.py` — SSM Parameter Store auth key fetcher (runs at cold start)
-- `lambda-approve/approver.py` — Approve Lambda handler
+- `lambda_create_user/Dockerfile` — CreateUser Lambda container image
+- `lambda_create_user/bootstrap` — Tailscale startup script
+- `lambda_create_user/fetch_authkey.py` — SSM Parameter Store auth key fetcher (runs at cold start)
+- `lambda_create_user/create_user.py` — CreateUser Lambda handler
 
 ---
 
@@ -71,7 +71,7 @@ Admin clicks  ──────────►  Signup Lambda (/approve or /den
 # Infra explained
 ## How approve/deny tokens work
 
-When a user signs up, the Lambda encrypts the user's email and username with Fernet symmetric encryption. The Fernet key is stored in SSM Parameter Store SecureString and fetched at Lambda cold start. The encrypted payload becomes the `token` parameter in the approve/deny links. On click, the approve Lambda decrypts the token with Fernet to recover the payload, generates a random password, and calls the signup API over Tailscale.
+When a user signs up, the Lambda encrypts the user's email and username with Fernet symmetric encryption. The Fernet key is stored in SSM Parameter Store SecureString and fetched at Lambda cold start. The encrypted payload becomes the `token` parameter in the approve/deny links. On click, the CreateUser Lambda decrypts the token with Fernet to recover the payload, generates a random password, and calls the user API over Tailscale.
 
 - Only someone with the Fernet key can forge a valid token
 - The key is stored in SSM SecureString (encrypted at rest with AWS-managed key)
@@ -95,8 +95,8 @@ in any Lambda environment variable or CloudFormation parameter. At cold start:
 |-----------|-------------|
 | `FromAdminEmail` | SES sender email (must be verified) |
 | `ToAdminEmail` | SES recipient email (optional, defaults to From) |
-| `ApproveApiBaseUrl` | URL of the WebDAV signup API on your tailnet (e.g. `http://my-server:3000`) |
-| `ApproveApiUsername` | Basic auth username for the API |
+| `UserApiBaseUrl` | URL of the WebDAV User API on your tailnet (e.g. `http://my-server:3000`) |
+| `UserApiUsername` | Basic auth username for the API |
 | `Architecture` | Lambda architecture: `arm64` or `x86_64` (default `x86_64`) |
 
 **SSM Parameter Store parameters (created by setup script before deploy):**
@@ -105,7 +105,7 @@ in any Lambda environment variable or CloudFormation parameter. At cold start:
 |-----------|-------------|
 | `/home-cloud/fernet-key` | Fernet encryption key for tokens |
 | `/home-cloud/tailscale-auth-key` | Tailscale ephemeral auth key (`tskey-auth-...`) |
-| `/home-cloud/admin-api-password` | Basic auth password for the signup API |
+| `/home-cloud/admin-api-password` | Basic auth password for the User API |
 
 ---
 
@@ -132,14 +132,14 @@ Edit `infrastructure-no-kms-ssm/lambda/signup.html`, then re-run the package + d
 
 Edit `template.yaml` or `lambda/` files, then re-run the package + deploy commands. CloudFormation will update only the changed resources.
 
-**Updating the approve Lambda image:** If you change files in `lambda-approve/`, rebuild and push the Docker image, then update the Lambda function code:
+**Updating the CreateUser Lambda image:** If you change files in `lambda_create_user/`, rebuild and push the Docker image, then update the Lambda function code:
 
 ```bash
 ECR_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/home-cloud-ecr-repo"
 docker buildx build --provenance=false \
   -t ${ECR_URI}:latest \
-  -f infrastructure-no-kms-ssm/lambda-approve/Dockerfile \
-  infrastructure-no-kms-ssm/lambda-approve/
+  -f infrastructure-no-kms-ssm/lambda_create_user/Dockerfile \
+  infrastructure-no-kms-ssm/lambda_create_user/
 docker push ${ECR_URI}:latest
 
 # Force Lambda to use the new image

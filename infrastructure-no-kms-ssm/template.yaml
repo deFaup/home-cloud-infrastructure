@@ -16,14 +16,14 @@ Parameters:
     Type: String
     Description: Email address that receives signup notifications (SES To). Defaults to FromAdminEmail if left empty.
     Default: ""
-  ApproveApiBaseUrl:
+  UserApiBaseUrl:
     Type: String
     Description: >
       Base URL of the Json API endpoint accessible on your Tailscale network
       (e.g. http://my-server:3000 or http://100.x.y.z:3000).
-  ApproveApiUsername:
+  UserApiUsername:
     Type: String
-    Description: Username for Basic auth on the signup API.
+    Description: Username for Basic auth on the User API.
   Architecture:
     Type: String
     Default: x86_64
@@ -176,8 +176,8 @@ Resources:
       Environment:
         Variables:
           FERNET_KEY_PARAM: !Sub "/${AWS::StackName}/fernet-key"
-          API_BASE_URL: !Ref ApproveApiBaseUrl
-          API_USERNAME: !Ref ApproveApiUsername
+          API_BASE_URL: !Ref UserApiBaseUrl
+          API_USERNAME: !Ref UserApiUsername
           TAILSCALE_AUTHKEY_PARAM: !Sub "/${AWS::StackName}/tailscale-auth-key"
           ADMIN_API_PASSWORD_PARAM: !Sub "/${AWS::StackName}/admin-api-password"
 

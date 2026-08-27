@@ -17,19 +17,19 @@ Admin clicks  ──────────►  Signup Lambda (/approve or /den
                           lambda.invoke()
                                 │
                                 ▼
-                          Approve Lambda (private, no public URL)
+                          CreateUser Lambda (private, no public URL)
                                 │
                                 ▼
                            KMS decrypt
                            Generate password
                            POST via Tailscale SOCKS5 proxy
-                             → Registration API
+                             → User API
 ```
 
 **Resources created:**
 - Signup Lambda function (Python 3.14, reads `signup.html` from disk)
-- Approve Lambda function (container image with Tailscale, Python 3.14-slim)
-- ECR repository for the approve Lambda container image
+- CreateUser Lambda function (container image with Tailscale, Python 3.14-slim)
+- ECR repository for the CreateUser Lambda container image
 - Lambda Function URL for signup Lambda (public HTTPS endpoint, no API Gateway)
 - KMS key (encrypts usernames in approve/deny tokens)
 - IAM roles + policies (SES, KMS decrypt, ECR pull, Secrets Manager read, Lambda invoke)
@@ -39,10 +39,10 @@ Admin clicks  ──────────►  Signup Lambda (/approve or /den
 - `template.yaml` — CloudFormation stack definition
 - `lambda/signup.py` — Signup Lambda handler
 - `lambda/signup.html` — signup page (edit this to change the UI)
-- `lambda-approve/Dockerfile` — Approve Lambda container image
-- `lambda-approve/bootstrap` — Tailscale startup script
-- `lambda-approve/fetch_authkey.py` — Secrets Manager auth key fetcher (runs at cold start)
-- `lambda-approve/approver.py` — Approve Lambda handler
+- `lambda_create_user/Dockerfile` — CreateUser Lambda container image
+- `lambda_create_user/bootstrap` — Tailscale startup script
+- `lambda_create_user/fetch_authkey.py` — Secrets Manager auth key fetcher (runs at cold start)
+- `lambda_create_user/create_user.py` — CreateUser Lambda handler
 
 ---
 
@@ -69,7 +69,7 @@ Secrets manager resources are also not free,
 
 1. **AWS CLI** configured with credentials (see next section)
 2. **Tailscale auth key** — generate a ephemeral auth key at https://login.tailscale.com/admin/settings/keys. Make sure to set it as "reusable". Ephemeral keys have the benefits of removing the lambda node once it goes offline. If device approval is enabled, pre-approve the key. You'll set this in Secrets Manager after the stack is deployed.
-3. **Docker** with buildx plugin — required to build the approve Lambda container image.
+3. **Docker** with buildx plugin — required to build the CreateUser Lambda container image.
 
 ## AWS CLI configuration
 
@@ -186,8 +186,8 @@ aws ecr get-login-password --profile admin \
 # Build the image (must target linux/amd64 for Lambda)
 docker buildx build --provenance=false \
   -t ${ECR_URI}:latest \
-  -f infrastructure/lambda-approve/Dockerfile \
-  infrastructure/lambda-approve/
+  -f infrastructure/lambda_create_user/Dockerfile \
+  infrastructure/lambda_create_user/
 
 # Push to ECR
 docker push ${ECR_URI}:latest
@@ -226,8 +226,8 @@ aws cloudformation deploy \
   --parameter-overrides \
     FromAdminEmail=admin@test.com \
     ToAdminEmail=admin2@test.com \
-    ApproveApiBaseUrl=http://your-server:3000 \
-    ApproveApiUsername=admin \
+    UserApiBaseUrl=http://your-server:3000 \
+    UserApiUsername=admin \
     Architecture=x86_64 \
   --capabilities CAPABILITY_IAM \
   --role-arn arn:aws:iam::$ACCOUNT_ID:role/home-cloud-deployer-role
@@ -253,7 +253,7 @@ aws secretsmanager put-secret-value \
   --secret-string "your-admin-api-password"
 ```
 
-The approve Lambda fetches both values from Secrets Manager at cold start — they are never stored in
+The CreateUser Lambda fetches both values from Secrets Manager at cold start — they are never stored in
 environment variables or visible via `lambda:GetFunction`.
 
 ---
@@ -287,7 +287,7 @@ aws iam delete-role --profile admin --role-name home-cloud-deployer-role
 # Infra explained
 ## How approve/deny tokens work
 
-When a user signs up, the Lambda encrypts their username with the KMS key created by the stack. The encrypted username becomes the `token` parameter in the approve/deny links. On click, the approve Lambda decrypts the token with KMS to recover the username, generates a random password, and calls the signup API over Tailscale.
+When a user signs up, the Lambda encrypts their username with the KMS key created by the stack. The encrypted username becomes the `token` parameter in the approve/deny links. On click, the CreateUser Lambda decrypts the token with KMS to recover the username, generates a random password, and calls the user API over Tailscale.
 
 - Only someone with KMS access can forge a valid token
 - No secret needs to be stored or passed as a parameter
@@ -310,8 +310,8 @@ in any Lambda environment variable or CloudFormation parameter. At cold start:
 |-----------|-------------|
 | `FromAdminEmail` | SES sender email (must be verified) |
 | `ToAdminEmail` | SES recipient email (optional, defaults to From) |
-| `ApproveApiBaseUrl` | URL of the WebDAV signup API on your tailnet (e.g. `http://my-server:3000`) |
-| `ApproveApiUsername` | Basic auth username for the API |
+| `UserApiBaseUrl` | URL of the WebDAV User API on your tailnet (e.g. `http://my-server:3000`) |
+| `UserApiUsername` | Basic auth username for the API |
 | `Architecture` | Lambda architecture: `arm64` or `x86_64` (default `x86_64`) |
 
 **Secrets Manager secrets (set after deploy):**
@@ -319,7 +319,7 @@ in any Lambda environment variable or CloudFormation parameter. At cold start:
 | Secret name | Description |
 |-------------|-------------|
 | `<stack-name>/tailscale-auth-key` | Tailscale ephemeral auth key (`tskey-auth-...`) |
-| `<stack-name>/admin-api-password` | Basic auth password for the signup API |
+| `<stack-name>/admin-api-password` | Basic auth password for the User API |
 
 ---
 
@@ -346,14 +346,14 @@ Edit `infrastructure/lambda/signup.html`, then re-run the package + deploy comma
 
 Edit `template.yaml` or `lambda/` files, then re-run the package + deploy commands. CloudFormation will update only the changed resources.
 
-**Updating the approve Lambda image:** If you change files in `lambda-approve/`, rebuild and push the Docker image, then update the Lambda function code:
+**Updating the CreateUser Lambda image:** If you change files in `lambda_create_user/`, rebuild and push the Docker image, then update the Lambda function code:
 
 ```bash
 ECR_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/home-cloud-ecr-repo"
 docker buildx build --provenance=false \
   -t ${ECR_URI}:latest \
-  -f infrastructure/lambda-approve/Dockerfile \
-  infrastructure/lambda-approve/
+  -f infrastructure/lambda_create_user/Dockerfile \
+  infrastructure/lambda_create_user/
 docker push ${ECR_URI}:latest
 
 # Force Lambda to use the new image
