@@ -29,5 +29,6 @@ RUN mkdir -p /tmp/tailscale && \
     mkdir -p /var/lib && ln -s /tmp/tailscale /var/lib/tailscale
 
 RUN chmod +x ${FUNCTION_DIR}/bootstrap
-
+RUN addgroup -S app && adduser -S -G app app
+USER app
 ENTRYPOINT ["/function/bootstrap"]

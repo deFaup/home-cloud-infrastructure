@@ -1,13 +1,16 @@
 # backlog
 
+code:
 - SFTP to send email to the requester
-- passwords shouldn't be stored in the server.
-  - i don't think it's needed at all
-  - stored in plaintext in the server  `cat /var/www/webdav/.users`
 - signup page should let users create their password
   - include this in the whole encryption/decryption flow.
 - signup page should check that username is only alphanumerical characters.
 - passwords can have alpha & special characters
+
+infra:
+- passwords shouldn't be stored in the server.
+  - i don't think it's needed at all
+  - stored in plaintext in the server  `cat /var/www/webdav/.users`
 - clean up infra files:
   - one DEPLOY.md for both infra
   - new arch.md with diagrams
