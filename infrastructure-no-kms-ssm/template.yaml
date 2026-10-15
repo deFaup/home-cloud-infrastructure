@@ -1,11 +1,12 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  Home Cloud Stack. Creates a lambda function that will serve as signup page (via a public lambda function URL).
+  Home Cloud Stack. Creates a 'Signup' lambda function that will serve as signup page (via a public lambda function URL).
   Signup requires username and email address.
-  The page send the signup request by email (via SES) to the admin.
-  Included in that email are two links to an approve/deny lambda function.
-  Request to this lambda are authenticated using Fernet-encrypted user email address (present in the email to the admin).
-  The approve function creates the user account via a json API endpoint accessible over Tailscale.
+  Sending a signup request calls the lambda again which then sends an email (via SES) to the admin.
+  That email contains two links to send an approve/deny request to the `/approver` endpoint of the lambda.
+  The request is authenticated through a Fernet-encrypted token passed as a query parameter.
+  Once authenticated, approval request are forwarded to the `CreateUser` lambda function.
+  The later function creates the user account via a json API endpoint accessible over Tailscale.
   Secrets are stored in SSM Parameter Store SecureString (created via setup script, not CloudFormation).
 
 Parameters:
