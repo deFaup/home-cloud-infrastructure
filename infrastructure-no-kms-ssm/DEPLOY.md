@@ -3,7 +3,7 @@
 1. **AWS CLI** configured with credentials (see next section)
 2. **Tailscale auth key** — generate a ephemeral auth key at https://login.tailscale.com/admin/settings/keys. Make sure to set it as "reusable". Ephemeral keys have the benefits of removing the lambda node once it goes offline. If device approval is enabled, pre-approve the key.
 3. **Docker** with buildx plugin — required to build the CreateUser Lambda container image.
-4. **Python 3** with `cryptography` package — required by the setup script to generate a Fernet key.
+4. **Python 3** with `cryptography` package — required by the setup script to generate a Fernet key (auto installed via pip3 if not detected).
 
 ## AWS CLI configuration
 
@@ -15,7 +15,7 @@ To authenticate with aws in the aws-cli do the following:
 
 Your terminal will show "Updated profile default to use arn:aws:iam::<AWS_ACCOUNT_ID>:root credentials."
 
-The region you entered is the geographical location where aws resources will be deployed. If you're having problem seeing your aws resources in the UI adjust the region to match the one you entered in your terminal. (_in the top header, in-between the settings icon and your profile name, click on the arrow down_).
+The region you entered is the geographical location where aws resources will be deployed. If later on you're having problem seeing your aws resources in the UI adjust the region to match the one you entered in your terminal. (_in the top header, in-between the settings icon and your profile name, click on the arrow down_).
 
 ![AWS regions](../aws-regions.png)
 
@@ -51,10 +51,7 @@ ACCOUNT_ID=$(aws sts get-caller-identity --profile admin --query Account --outpu
 ```
 
 # First-time deployment commands (RUN ONCE)
-Login to AWS through the CLI if not done already
-```bash
-aws login --profile admin
-```
+Login to AWS through the CLI if not done already.
 
 Next we need to create a few resources manually.
 - a deployer policy and role
@@ -101,7 +98,7 @@ aws iam create-policy \
   --policy-name home-cloud-deployer-policy \
   --policy-document file://infrastructure-no-kms-ssm/deployer-policy.json
 ```
-For update:
+For updates:
 ```sh
 aws iam create-policy-version \
   --profile admin \
@@ -179,22 +176,26 @@ docker buildx build --provenance=false \
 docker push ${ECR_URI}:latest
 ```
 
-If you ever need to update your ECR image you can repeat those steps beside the 1st one which becomes:
+**Updating the ECR image**:
+
+\> Repeat all steps above but replace the 1st step (Create) with the following (point to your ECR URI instead of creating one):
 ```bash
 AWS_REGION=$(aws configure get region --profile admin 2>/dev/null || echo "us-east-1")
 ECR_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/home-cloud-ecr-repo"
 ```
 
-You must replace the AWS_REGION= with your own. You can also find the full string on aws at Amazon ECR > Private registry > Repositories
-Make sure to remove the older image as well.
+AWS_REGION is set to the region you entered when the admin profile was created. The full string for ECR_URI is also available on aws ui at Amazon ECR > Private registry > Repositories
+
+\> Remove the older image as well after the update to avoid extra storage fees.
 
 ---
 
 # Package the Signup lambda code
-The "Signup" Lambda function’s code comprises of the main 'signup.py' file containing the function’s handler code, python dependencies and the static HTML page. Cloudformation (cfn) cannot ship this all-at-once, we must first create a zip package, upload it and refenrence it in the cfn template.
-_Note: when using the CLI only it is possible to pass the zip directly. _
+The "Signup" Lambda function’s code comprises of the main 'signup.py' file containing the function’s handler code, python dependencies and the static HTML page. Cloudformation (cfn) cannot ship this all-at-once, we must create a zip package, upload it and reference it in the cfn template.
 
-The cloudformation package command zips the whole directory where the template lives, uploads that to S3 and finally creates a new template where the Signup lambda config now includes Code.S3Bucket and Code.S3Key pointing to the uploaded zip file."
+_Note: when using the CLI only it is possible to pass the zip directly._
+
+The cloudformation package command zips the whole directory where the template lives, uploads that to S3 and finally creates a new template where the Signup lambda config now includes `Code.S3Bucket` and `Code.S3Key` pointing to the uploaded zip file.
 
 ```bash
 # Install python dependency required for the Signup lambda function
@@ -208,6 +209,8 @@ aws cloudformation package \
   --profile admin
 rm -rf infrastructure-no-kms-ssm/lambda_signup/packages
 ```
+Note: You might see a red error from pip saying the version of 'cryptography' is conflicting with another package. You can ignore this since the package is only installed in a temporary folder with the lambda code.
+
 Alternatively you can zip the signup lambda folder only, upload it and then update the lambda code. It requires having the template pointing to the static zip file in S3 and update the handler path.
 ```
 # mkdir -p infrastructure-no-kms-ssm/lambda_signup/packages
@@ -235,7 +238,7 @@ aws cloudformation deploy \
   --capabilities CAPABILITY_IAM \
   --role-arn arn:aws:iam::$ACCOUNT_ID:role/home-cloud-deployer-role
 ```
-Replace `admin@example.com` with your actual admin email. Architecture defaults to `x86_64` but you **must** set this to arm if you are building on an arm machine.
+Replace `admin@example.com` with your actual admin email. Architecture defaults to `x86_64` but you **must** set this to `arm64` if you are building on an arm machine.
 
 ---
 
