@@ -6,7 +6,7 @@ from pathlib import Path
 
 import boto3
 import sys
-sys.path.insert(0, './packages')
+sys.path.insert(0, './lambda_signup/packages')
 
 from cryptography.fernet import Fernet
 from botocore.exceptions import ClientError
