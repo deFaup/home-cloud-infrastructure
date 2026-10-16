@@ -1,6 +1,7 @@
 import os
 import json
 import base64
+import re
 import urllib.parse
 from pathlib import Path
 
@@ -76,6 +77,9 @@ def handle_registration(event):
 
     if not username or not email:
         return html_response(400, "<h1>Missing fields</h1><p>Username and email are required.</p>")
+
+    if not re.fullmatch(r"[A-Za-z0-9]+", username):
+        return html_response(400, "<h1>Invalid username</h1><p>only letters and numbers allowed.</p>")
 
     base_url = get_base_url(event)
     approve_token = encrypt_token({"email": email, "user": username, "approved": "true"})

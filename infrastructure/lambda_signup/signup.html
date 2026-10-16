@@ -162,7 +162,7 @@
     <form id="registerForm" action="/" method="POST">
       <div class="form-group">
         <label for="username">Username</label>
-        <input type="text" id="username" name="username" placeholder="Choose a username" required>
+        <input type="text" id="username" name="username" placeholder="Choose a username" pattern="[A-Za-z0-9]+" title="Username must be alphanumeric only" required>
       </div>
       <div class="form-group">
         <label for="email">Email</label>

@@ -2,10 +2,6 @@
 
 code:
 - SFTP to send email to the requester
-- signup page should let users create their password
-  - include this in the whole encryption/decryption flow.
-- signup page should check that username is only alphanumerical characters.
-- passwords can have alpha & special characters
 
 infra:
 - passwords shouldn't be stored in the server.
