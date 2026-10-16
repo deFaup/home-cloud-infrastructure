@@ -1,9 +1,16 @@
+This infrastructure can be deployed with 2 differents stacks.
+- The first one (under `infrastructure`) uses AWS KMS and AWS Secrets Manager to deal with encryption and the storage of our secrets.
+- The second one (under `infrastructure-no-kms-ssm`) takes care of encryption on its own using Fernet cryptographic keys and AWS Parameter store to store the secrets.
+
+Since KMS and Secrets manager are not free to use the second stack is virtually free to run.
+Most of the steps below are identical for both stacks but in some occasion they will be split in two when needed.
+
 # Deployment Pre-requisites
 
 1. **AWS CLI** configured with credentials (see next section)
 2. **Tailscale auth key** — generate a ephemeral auth key at https://login.tailscale.com/admin/settings/keys. Make sure to set it as "reusable". Ephemeral keys have the benefits of removing the lambda node once it goes offline. If device approval is enabled, pre-approve the key.
 3. **Docker** with buildx plugin — required to build the CreateUser Lambda container image.
-4. **Python 3** with `cryptography` package — required by the setup script to generate a Fernet key (auto installed via pip3 if not detected).
+4. **Python 3** with `cryptography` package — required by the setup script to generate a Fernet key (auto installed via pip3 if not detected). _Only needed for the no KMS stack._
 
 ## AWS CLI configuration
 
@@ -42,7 +49,7 @@ Save the result for later
 
 ---
 
-# Deployments steps
+# Run every time
 
 Run this every time you have been logged out of the aws cli. 
 ```bash
@@ -55,11 +62,17 @@ Login to AWS through the CLI if not done already.
 
 Next we need to create a few resources manually.
 - a deployer policy and role
-- an S3 bucket to store the packaged code for the landing page/signup page lambda
+- an S3 bucket to store the packaged code for the signup lambda
 - an ECR repo; build a docker image and push it to the ECR
-- save to SSM Parameter Store the Tailscale auth key, the admin API key and an encryption key
+- (**2nd stack only**) save to SSM Parameter Store the Tailscale auth key, the admin API key and an encryption key
 
 Simply run the script below to take care of all this. I strongly recommend reading the explanation beneath.
+
+**1st stack only**
+```bash
+./infrastructure/first-deploy.sh
+```
+**2nd stack only**
 ```bash
 ./infrastructure-no-kms-ssm/first-deploy.sh
 ```
@@ -128,6 +141,7 @@ You can always delete it later without breaking the signup page. If you decide t
 ---
 
 ### III. Create SSM Parameter Store SecureString parameters
+**2nd stack only**
 
 The stack requires three SSM SecureString parameters that cannot be created by CloudFormation.
 Run the setup script **before deploying the stack**:
@@ -172,6 +186,12 @@ docker buildx build --provenance=false \
   -f infrastructure-no-kms-ssm/lambda_create_user/Dockerfile \
   infrastructure-no-kms-ssm/lambda_create_user/
 
+# For KMS stack
+# docker buildx build --provenance=false \
+#   -t ${ECR_URI}:latest \
+#   -f infrastructure/lambda_create_user/Dockerfile \
+#   infrastructure/lambda_create_user/
+
 # Push to ECR
 docker push ${ECR_URI}:latest
 ```
@@ -197,6 +217,17 @@ _Note: when using the CLI only it is possible to pass the zip directly._
 
 The cloudformation package command zips the whole directory where the template lives, uploads that to S3 and finally creates a new template where the Signup lambda config now includes `Code.S3Bucket` and `Code.S3Key` pointing to the uploaded zip file.
 
+**1st stack only**
+```bash
+HOME_CLOUD_DEPLOY_BUCKET=home-cloud-bucket
+aws cloudformation package \
+  --template-file infrastructure/template.yaml \
+  --s3-bucket $HOME_CLOUD_DEPLOY_BUCKET \
+  --output-template-file infrastructure/packaged.yaml \
+  --profile admin
+```
+
+**2nd stack only**
 ```bash
 # Install python dependency required for the Signup lambda function
 mkdir -p infrastructure-no-kms-ssm/lambda_signup/packages
@@ -223,7 +254,9 @@ Alternatively you can zip the signup lambda folder only, upload it and then upda
 ---
 
 # Deploy
+Replace `admin@example.com` with your actual admin email. Architecture defaults to `x86_64` but you **must** set this to `arm64` if you are building on an arm machine.
 
+**2nd stack only**
 ```bash
 aws cloudformation deploy \
   --profile admin \
@@ -238,14 +271,54 @@ aws cloudformation deploy \
   --capabilities CAPABILITY_IAM \
   --role-arn arn:aws:iam::$ACCOUNT_ID:role/home-cloud-deployer-role
 ```
-Replace `admin@example.com` with your actual admin email. Architecture defaults to `x86_64` but you **must** set this to `arm64` if you are building on an arm machine.
+
+**1st stack only**
+```bash
+aws cloudformation deploy \
+  --profile admin \
+  --template-file infrastructure/packaged.yaml \
+  --stack-name home-cloud \
+  --parameter-overrides \
+    FromAdminEmail=admin@test.com \
+    ToAdminEmail=admin2@test.com \
+    UserApiBaseUrl=http://your-server:3000 \
+    UserApiUsername=admin \
+    Architecture=x86_64 \
+  --capabilities CAPABILITY_IAM \
+  --role-arn arn:aws:iam::$ACCOUNT_ID:role/home-cloud-deployer-role
+```
+
+For the first stack once the deployment has completed you must now save the secrets into Secrets Manager
+
+## Set secrets in Secrets Manager
+**1st stack only**
+
+The stack creates two Secrets Manager secrets with no value. After deploy,
+update them with your real values:
+
+```bash
+# Tailscale auth key
+aws secretsmanager put-secret-value \
+  --profile admin \
+  --secret-id "home-cloud/tailscale-auth-key" \
+  --secret-string "tskey-auth-YOUR-KEY"
+
+# API password for Basic auth on the webdav server admin API
+aws secretsmanager put-secret-value \
+  --profile admin \
+  --secret-id "home-cloud/admin-api-password" \
+  --secret-string "your-admin-api-password"
+```
+
+The CreateUser Lambda fetches both values from Secrets Manager at cold start — they are never stored in
+environment variables or visible via `lambda:GetFunction`.
 
 ---
 
 # Delete the stack
 Simply run the script below to take care of all this.
 ```bash
-./infrastructure-no-kms-ssm/delete-all-aws-resources.sh
+./delete-all-aws-resources.sh
 ```
 
 ---
