@@ -124,6 +124,19 @@ Resources:
       Roles:
         - !Ref SignupLambdaExecutionRole
 
+  SignupLambdaFunctionUrlPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub "${AWS::StackName}-signup-function-url-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: lambda:GetFunctionUrlConfig
+            Resource: !GetAtt SignupFunction.Arn
+      Roles:
+        - !Ref SignupLambdaExecutionRole
+
   SignupLambdaSsmPolicy:
     Type: AWS::IAM::Policy
     Properties:
@@ -176,9 +189,9 @@ Resources:
       MemorySize: 128
       Environment:
         Variables:
-          FERNET_KEY_PARAM: !Sub "/${AWS::StackName}/fernet-key"
           API_BASE_URL: !Ref UserApiBaseUrl
           API_USERNAME: !Ref UserApiUsername
+          FERNET_KEY_PARAM: !Sub "/${AWS::StackName}/fernet-key"
           TAILSCALE_AUTHKEY_PARAM: !Sub "/${AWS::StackName}/tailscale-auth-key"
           ADMIN_API_PASSWORD_PARAM: !Sub "/${AWS::StackName}/admin-api-password"
 

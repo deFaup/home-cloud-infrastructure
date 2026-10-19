@@ -66,7 +66,7 @@ def handle_registration(event):
         return html_response(400, "<h1>Invalid username</h1><p>only letters and numbers allowed.</p>")
 
 
-    base_url = get_base_url(event)
+    base_url = _get_public_base_url() or get_base_url(event)
     approve_token = encrypt_token({"email": email, "user": username, "approved": "true"})
     deny_token = encrypt_token({"email": email, "user": username, "approved": "false"})
     approve_url = f"{base_url}/approver?token={approve_token}"
@@ -193,7 +193,28 @@ def decrypt_token(token):
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
+_public_base_url = None
+
+def _get_public_base_url():
+    """Return the lambda's public base URL from its Function URL config or None if the lookup fails.
+    Cached for the life of the execution environment.
+    """
+    global _public_base_url
+    if _public_base_url is None:
+        try:
+            resp = lmbd.get_function_url_config(
+                FunctionName=os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "")
+            )
+            _public_base_url = resp["FunctionUrl"].rstrip("/")
+        except Exception as exc:
+            print(f"GetFunctionUrlConfig error: {exc}")
+            return None
+    return _public_base_url
+
 def get_base_url(event):
+    """Get the base URL for callbacks from the Host header. 
+    Slightly unsafe but ok since aws does not allow arbitrary Host headers.
+    """
     headers = event.get("headers", {})
     host = headers.get("host", "")
     scheme = headers.get("x-forwarded-proto", "https")

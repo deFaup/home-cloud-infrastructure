@@ -144,13 +144,26 @@ Resources:
   SignupLambdaInvokeApprovePolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: !Sub "${AWS::StackName}-signup-invoke-lambda--policy"
+      PolicyName: !Sub "${AWS::StackName}-signup-invoke-lambda-policy"
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Action: lambda:InvokeFunction
             Resource: !GetAtt CreateUserFunction.Arn
+      Roles:
+        - !Ref SignupLambdaExecutionRole
+
+  SignupLambdaFunctionUrlPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub "${AWS::StackName}-signup-function-url-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: lambda:GetFunctionUrlConfig
+            Resource: !GetAtt SignupFunction.Arn
       Roles:
         - !Ref SignupLambdaExecutionRole
 
