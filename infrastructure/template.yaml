@@ -179,8 +179,6 @@ Resources:
     Properties:
       EmailIdentity: !Ref ToAdminEmail
 
-
-
   # ── CreateUser Lambda — container image with Tailscale ────────────────────────
   CreateUserFunction:
     Type: AWS::Lambda::Function

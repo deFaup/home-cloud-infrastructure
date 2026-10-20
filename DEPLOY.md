@@ -24,7 +24,7 @@ Your terminal will show "Updated profile default to use arn:aws:iam::<AWS_ACCOUN
 
 The region you entered is the geographical location where aws resources will be deployed. If later on you're having problem seeing your aws resources in the UI adjust the region to match the one you entered in your terminal. (_in the top header, in-between the settings icon and your profile name, click on the arrow down_).
 
-![AWS regions](../aws-regions.png)
+![AWS regions](./resources/aws-regions.png)
 
 Test the connection and save your account ID:
 ```bash
@@ -45,7 +45,7 @@ At https://login.tailscale.com/admin/settings/keys
 - click Generate key
 Save the result for later
 
-![tailscale-key](../tailscale-key.gif)
+![tailscale-key](./resources/tailscale-key.gif)
 
 ---
 
@@ -196,6 +196,7 @@ docker buildx build --provenance=false \
 docker push ${ECR_URI}:latest
 ```
 
+<a id="ecr-update"></a>
 **Updating the ECR image**:
 
 \> Repeat all steps above but replace the 1st step (Create) with the following (point to your ECR URI instead of creating one):
@@ -254,7 +255,10 @@ Alternatively you can zip the signup lambda folder only, upload it and then upda
 ---
 
 # Deploy
-Replace `admin@example.com` with your actual admin email. Architecture defaults to `x86_64` but you **must** set this to `arm64` if you are building on an arm machine.
+Run the aws cfn deploy command below to create all aws resources.
+- Replace the dummy emails `admin@test.com` with email addresses you own
+- ToAdminEmail is optional and defaults to the same address as FromAdminEmail
+- Architecture defaults to `x86_64` but you **must** set this to `arm64` if you are building on an arm machine
 
 **2nd stack only**
 ```bash
@@ -312,6 +316,24 @@ aws secretsmanager put-secret-value \
 
 The CreateUser Lambda fetches both values from Secrets Manager at cold start — they are never stored in
 environment variables or visible via `lambda:GetFunction`.
+
+---
+
+# Update the stack
+More information available [here](arch.md#editing-the-signup-page)
+
+Depending on the resources you want to update you will need to run different commands.
+
+To update the Signup lambda function:
+- Run the package command ([here](#package-the-signup-lambda-code))
+- Run the deploy command
+
+To update the CreateUser lambda function
+- build and push a new image to the ECR (See [this section](#ecr-update))
+- go to the lambda function UI and click on 'Deploy a new image'
+- click on 'Browse images'
+- select the new image that was just pushed
+- click on Save
 
 ---
 

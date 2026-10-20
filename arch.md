@@ -1,45 +1,34 @@
-# Infrastructure
-## Architecture
+# Architecture
+Two stacks exist for this project:
+- 1st stack is saved under `infrastructure/`
+- 1st stack is saved under `infrastructure-no-kms-ssm/`
+Both share the same overall architecture
 
-```
-User browser  ──GET /──►  Signup Lambda (public URL)
-               POST /        │
-                             ▼
-                    Lambda (Python 3.14)
-                       │          │
-                       ▼          ▼
-                  Serve HTML    SES → admin email
-                  (from file)   (with Fernet-encrypted approve/deny links)
+![arch](./resources/arch.drawio.svg)
 
-Admin clicks  ──────────►  Signup Lambda (/approve or /deny)
-  approve link                  │
-                                ▼
-                          lambda.invoke()
-                                │
-                                ▼
-                          CreateUser Lambda (private, no public URL)
-                                │
-                                ▼
-                           Fernet decrypt (key from SSM)
-                           Generate password
-                           POST via Tailscale SOCKS5 proxy
-                             → User API
-```
+---
 
-**Resources created:**
+# Resource created
+
+## Not managed by CloufFormation
+- a deployer role and its policy 
+- an S3 bucket to store the packaged code for the Signup lambda
+- an ECR repo to store the docker image for the CreateUser lambda
+- (**2nd stack only**) three SSM Parameter Store SecureString parameters (Fernet key, Tailscale auth key, User API password)
+
+## Managed by CloufFormation
 - Signup Lambda function (Python 3.14, reads `signup.html` from disk)
-- CreateUser Lambda function (container image with Tailscale, Python 3.14-slim)
-- ECR repository for the CreateUser Lambda container image
 - Lambda Function URL for the Signup Lambda (public HTTPS endpoint, no API Gateway)
-- IAM roles + policies (SES, SSM Parameter Store read, ECR pull, Lambda invoke)
+- CreateUser Lambda function (container image with Tailscale, Python 3.13-alpine)
+- IAM roles + policies for the two lambdas (SES, Lambda invoke, Get function URL, SSM Parameter Store read, ECR pull)
 - SES email identities (admin email, must be verified)
+- **1st stack only** Secrets Manager secrets (Tailscale auth key, User API password)
+- **1st stack only** KMS Encryption key
 
-**NOT created by CloudFormation (managed via setup script):**
-- SSM Parameter Store SecureString parameters (Fernet key, Tailscale auth key, API password)
-
-**Files:**
+## Files
 - `template.yaml` — CloudFormation stack definition
-- `setup-parameters.sh` — Creates SSM SecureString parameters (run before deploying)
+- `setup-parameters.sh` — Creates SSM SecureString parameters (2nd stack only)
+- `first-deploy.sh` — Creates all resources not managed by cfn (run before deploying)
 - `deployer-policy.json` — IAM policy for the CloudFormation deployer role
 - `lambda/signup.py` — Signup Lambda handler
 - `lambda/signup.html` — Signup page (edit this to change the UI)
@@ -47,24 +36,55 @@ Admin clicks  ──────────►  Signup Lambda (/approve or /den
 - `lambda_create_user/bootstrap` — Tailscale startup script
 - `lambda_create_user/fetch_authkey.py` — SSM Parameter Store auth key fetcher (runs at cold start)
 - `lambda_create_user/create_user.py` — CreateUser Lambda handler
+- `lambda_create_user/requirements.txt` — Python dependencies
 
 ---
 
-## Cost
+# Cost
 
 | Resource | Free tier | Typical monthly cost |
 |----------|-----------|---------------------|
-| **CloudFormation** | **Always free** — no charge for stacks | **$0** |
-| Lambda Function URL | Free (included with Lambda) | **$0** |
+| **CloudFormation** | **Always free** — no charge for stacks | $0|
+| Lambda Function URL | Free (included with Lambda) | $0|
 | Lambda | 1 M requests + 400K GB-seconds/month (12 months) | ~$0 after free tier |
 | SES | 62K emails/month (from Lambda) | ~$0 |
 | S3 | $0.023 per GB | ~$0 |
-| SSM Parameter Store | 10,000 parameters/month (free tier) | **$0** |
+| SSM Parameter Store | 10,000 parameters/month (free tier) | $0|
 
-> **No KMS or Secrets Manager costs.** This stack uses SSM Parameter Store SecureString (free)
-> and Fernet symmetric encryption (no AWS service calls for encrypt/decrypt).
+**1st stack only**:
+- Secrets Manager Secret Storage: **$0.40** per secret per month
+- KMS Customer Managed Keys: **$1.00** per month per key
 
-> **Reminder:** CloudFormation itself is free. You only pay for the resources it creates. All resources here stay within the AWS free tier.
+---
+
+# Sequence diagrams
+
+**User signup diagram**:
+```plantuml
+@startuml
+participant User
+participant "Signup Lambda" as Signup
+participant SES
+
+User -> Signup: GET /
+Signup --> User: static html form
+
+User -> Signup: POST / (username, email)
+Signup -> Signup: Create encrypted token
+Signup -> SES: Send email to admin
+SES --> Signup: Delivery ACK
+
+alt delivered
+  Signup --> User: Success page
+else delivery failure
+  Signup --> User: Error page
+end
+@enduml
+```
+
+**Admin approving a request diagram**:
+
+![diag](./resources/admin-approval.drawio.svg)
 
 ---
 
@@ -122,17 +142,21 @@ Share this URL with users. Visiting it shows the signup form.
 
 ---
 
-## Editing the signup page
-
-Edit `infrastructure-no-kms-ssm/lambda/signup.html`, then re-run the package + deploy commands. The HTML is read from disk at Lambda cold start, so changes take effect on the next deployment.
-
----
-
 ## Updating the stack
 
 Edit `template.yaml` or `lambda/` files, then re-run the package + deploy commands. CloudFormation will update only the changed resources.
 
-**Updating the CreateUser Lambda image:** If you change files in `lambda_create_user/`, rebuild and push the Docker image, then update the Lambda function code:
+---
+
+## Editing the signup page
+
+If you edit `signup.html`, then re-run the package + deploy commands. The HTML is read from disk at Lambda cold start, so changes take effect on the next deployment.
+
+---
+
+## Updating the create user lambda
+
+If you change files in `lambda_create_user/`, rebuild and push the Docker image, then update the Lambda function code:
 
 ```bash
 ECR_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/home-cloud-ecr-repo"
@@ -152,7 +176,7 @@ aws lambda update-function-code \
 
 ---
 
-## Rotating the Fernet key
+## Rotating the Fernet key (2nd stack only)
 
 If you need to rotate the Fernet key (e.g., suspected compromise):
 
