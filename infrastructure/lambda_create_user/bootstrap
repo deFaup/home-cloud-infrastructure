@@ -26,7 +26,7 @@ done
 # Connect this node to the tailnet using the ephemeral key from SSM.
 ${FUNCTION_DIR}/tailscale up \
   --auth-key=$(cat /tmp/tailscale-authkey) \
-  --hostname=lambda_create_user \
+  --hostname=lambda-create-user \
   --accept-routes
 
 # Clean up the key file — it is no longer needed.
