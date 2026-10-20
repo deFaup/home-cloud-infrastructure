@@ -60,26 +60,25 @@ Both share the same overall architecture
 # Sequence diagrams
 
 **User signup diagram**:
-```plantuml
-@startuml
+```mermaid
+sequenceDiagram
 participant User
-participant "Signup Lambda" as Signup
+participant Signup as Signup Lambda
 participant SES
 
-User -> Signup: GET /
-Signup --> User: static html form
+User ->> Signup: GET /
+Signup -->> User: static html form
 
-User -> Signup: POST / (username, email)
-Signup -> Signup: Create encrypted token
-Signup -> SES: Send email to admin
-SES --> Signup: Delivery ACK
+User ->> Signup: POST / (username, email)
+Signup ->> Signup: Create encrypted token
+Signup ->> SES: Send email to admin
+SES -->> Signup: Delivery ACK
 
 alt delivered
-  Signup --> User: Success page
+  Signup -->> User: Success page
 else delivery failure
-  Signup --> User: Error page
+  Signup -->> User: Error page
 end
-@enduml
 ```
 
 **Admin approving a request diagram**:
